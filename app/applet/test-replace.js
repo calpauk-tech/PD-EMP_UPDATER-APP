@@ -1,15 +1,25 @@
-const msg = "409 Error: Validation failed (custom_5224: Validation error - PropertyRequired: custom_5224) - Check for required fields and invalid field values. Remember to read the instructions for each field.";
-const cf = { originalName: "custom_5224", description: "Test field 2" };
 
-let enhanced = msg;
-if (enhanced.toLowerCase().includes(cf.originalName.toLowerCase()) && !enhanced.includes(`(${cf.description})`)) {
-    const escapedName = cf.originalName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`(^|[^a-zA-Z0-9_])${escapedName}([^a-zA-Z0-9_]|$)`, 'gi');
-    enhanced = enhanced.replace(regex, `$1${cf.originalName} (${cf.description})$2`);
-    
-    if (enhanced === msg) {
-        const fallbackRegex = new RegExp(escapedName, 'gi');
-        enhanced = enhanced.replace(fallbackRegex, `${cf.originalName} (${cf.description})`);
-    }
+const targets = [{label: 'Skill - CPR'}];
+const lower = 'skill: cpr (x)';
+const prefixMatch = lower.match(/^(skill|department|employee group|group)\s*[:-]\s*(.*)$/i);
+let category = '';
+let itemName = '';
+if (prefixMatch) {
+    category = prefixMatch[1].toLowerCase();
+    itemName = prefixMatch[2].trim();
 }
-console.log(enhanced);
+// check earlier cleanLower logic
+const cleanLower = lower.replace(/[^a-z0-9]/g, '');
+// wait, the previous logic did: if (!match) cleanLower... break;
+// Ah! Wait! The cleanLower alias code runs inside `if (!match)`
+// And THEN we have another `if (!match)` where the prefix logic runs:
+//     if (!match) {
+//         const prefixMatch = lower.match(/.../);
+//     }
+// Let's print out what we get
+console.log({
+    prefixMatch: !!prefixMatch,
+    category,
+    itemName,
+    cleanItemName: itemName.replace(/\(x\)$/i, '').trim().toLowerCase()
+});
