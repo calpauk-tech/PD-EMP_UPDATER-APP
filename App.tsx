@@ -283,7 +283,7 @@ const ConfirmModal: React.FC<{
     onClose: () => void; 
     onConfirm: () => void; 
     title: string; 
-    message: string; 
+    message: string | React.ReactNode; 
     confirmText: string; 
     cancelText: string 
 }> = ({ isOpen, onClose, onConfirm, title, message, confirmText, cancelText }) => {
@@ -2282,7 +2282,16 @@ const getNonEmptyHeaders = (json: any[]) => {
     });
 };
 
-const MultiSelectMenu = ({ label, options, selectedIds, onChange }: { label: string, options: {id: number, name: string}[], selectedIds: number[], onChange: (ids: number[]) => void }) => {
+const MultiSelectMenu = ({ label, options, selectedIds, onChange, toggleOptionLabel, toggleOptionEnabled, onToggleOption, toggleTooltipText }: { 
+    label: string, 
+    options: {id: number, name: string}[], 
+    selectedIds: number[], 
+    onChange: (ids: number[]) => void,
+    toggleOptionLabel?: string,
+    toggleOptionEnabled?: boolean,
+    onToggleOption?: (enabled: boolean) => void,
+    toggleTooltipText?: React.ReactNode
+}) => {
     const [isOpen, setIsOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     
@@ -2302,12 +2311,40 @@ const MultiSelectMenu = ({ label, options, selectedIds, onChange }: { label: str
     const isAllSelected = selectedIds.length === 0 || selectedIds.length === options.length;
     const isNoneSelected = selectedIds.length === 1 && selectedIds[0] === -1;
     const filteredOptions = options.filter(opt => opt.name.toLowerCase().includes(searchTerm.toLowerCase()));
+    const isAllSearchFilteredSelected = filteredOptions.length > 0 && filteredOptions.every(opt => isAllSelected || selectedIds.includes(opt.id));
 
     const handleSelectAll = (checked: boolean) => {
         if (checked) {
             onChange([]);
         } else {
             onChange([-1]);
+        }
+    };
+
+    const handleSelectAllSearch = (checked: boolean) => {
+        if (checked) {
+            let newSelected = isAllSelected ? [...options.map(o => o.id)] : [...selectedIds];
+            if (!isAllSelected) {
+                filteredOptions.forEach(opt => {
+                    if (!newSelected.includes(opt.id)) {
+                        newSelected.push(opt.id);
+                    }
+                });
+                if (newSelected.length === options.length) {
+                    onChange([]);
+                } else {
+                    onChange(newSelected);
+                }
+            }
+        } else {
+            let newSelected = isAllSelected ? [...options.map(o => o.id)] : [...selectedIds];
+            const filteredIds = filteredOptions.map(o => o.id);
+            newSelected = newSelected.filter(id => !filteredIds.includes(id));
+            if (newSelected.length === 0) {
+                onChange([-1]);
+            } else {
+                onChange(newSelected);
+            }
         }
     };
 
@@ -2341,14 +2378,39 @@ const MultiSelectMenu = ({ label, options, selectedIds, onChange }: { label: str
     
     return (
         <div className="flex-1 min-w-[200px] relative" ref={menuRef}>
-            <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">{label}</label>
+            <div className="flex justify-between items-center mb-1">
+                <label className="block text-xs font-semibold text-gray-500 uppercase">{toggleOptionEnabled && toggleOptionLabel ? toggleOptionLabel : label}</label>
+                {onToggleOption && (
+                    <div className="flex items-center gap-2">
+                        {toggleTooltipText && (
+                            <div className="group relative flex items-center">
+                                <InfoIcon className="w-3.5 h-3.5 cursor-help transition-colors text-orange-500" />
+                                <div className="absolute right-0 bottom-full mb-2 w-64 bg-gray-900 text-white text-xs rounded p-2 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 normal-case font-normal shadow-lg">
+                                    {toggleTooltipText}
+                                </div>
+                            </div>
+                        )}
+                        <label className="relative inline-flex items-center cursor-pointer">
+                            <input 
+                                type="checkbox" 
+                                className="sr-only peer" 
+                                checked={!!toggleOptionEnabled}
+                                onChange={(e) => onToggleOption(e.target.checked)}
+                            />
+                            <div className="w-7 h-4 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-orange-500"></div>
+                        </label>
+                    </div>
+                )}
+            </div>
             <button 
                 type="button"
                 className="w-full text-left text-sm border border-gray-300 bg-white rounded-md shadow-sm px-3 py-2 flex items-center justify-between focus:ring-blue-500 focus:border-blue-500 hover:bg-gray-50"
                 onClick={() => setIsOpen(!isOpen)}
             >
                 <div className="truncate text-gray-700">
-                    {isAllSelected ? `All ${label.endsWith('s') ? label : label + 's'}` : `${isNoneSelected ? 0 : selectedIds.length} selected`}
+                    {isAllSelected 
+                        ? `All ${label === 'Department' ? (toggleOptionEnabled ? 'Primary Departments' : 'Departments') : (label.endsWith('s') ? label : label + 's')}` 
+                        : `${isNoneSelected ? 0 : selectedIds.length} selected`}
                 </div>
                 <span className="text-gray-400 ml-2">▼</span>
             </button>
@@ -2375,6 +2437,17 @@ const MultiSelectMenu = ({ label, options, selectedIds, onChange }: { label: str
                                     onChange={(e) => handleSelectAll(e.target.checked)}
                                 />
                                 <span className="text-sm text-gray-700 truncate">All</span>
+                            </label>
+                        )}
+                        {searchTerm.length > 0 && (
+                            <label className="flex items-center gap-3 px-4 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-50 font-medium">
+                                <input 
+                                    type="checkbox" 
+                                    className="text-blue-600 rounded bg-white border-gray-300 focus:ring-blue-500" 
+                                    checked={isAllSearchFilteredSelected}
+                                    onChange={(e) => handleSelectAllSearch(e.target.checked)}
+                                />
+                                <span className="text-sm text-gray-700 truncate">Select all</span>
                             </label>
                         )}
                         {filteredOptions.length === 0 ? (
@@ -2876,7 +2949,7 @@ const TableRow = React.memo(({
             })}
             {getUpdateColumns.length === 0 && (
                 <td className="p-8 border-x border-gray-200 bg-gray-50/20 text-gray-400 italic text-center w-full align-middle">
-                    Please add fields to the column using the dropdown selector at the top of the page.
+                    Please add fields to the update table using the dropdown selector at the top of the page.
                 </td>
             )}
             {getUpdateColumns.length > 0 && <td className="w-full bg-white"></td>}
@@ -2936,12 +3009,14 @@ const App: React.FC = () => {
     // Review step filters
     const [searchReview, setSearchReview] = useState('');
     const [filterDepartment, setFilterDepartment] = useState<number[]>([]);
+    const [filterPrimaryDepartment, setFilterPrimaryDepartment] = useState(false);
     const [filterGroup, setFilterGroup] = useState<number[]>([]);
     const [filterType, setFilterType] = useState<number[]>([]);
     const [showOnlyIssues, setShowOnlyIssues] = useState(false);
 
     // Export step filters
     const [exportFilterDepartment, setExportFilterDepartment] = useState<number[]>([]);
+    const [exportFilterPrimaryDepartment, setExportFilterPrimaryDepartment] = useState(false);
     const [exportFilterGroup, setExportFilterGroup] = useState<number[]>([]);
     const [exportFilterType, setExportFilterType] = useState<number[]>([]);
 
@@ -3294,8 +3369,14 @@ const App: React.FC = () => {
                 if (allEmployees.length === 0) setAllEmployees(employeesRaw);
 
                 const employees = employeesRaw.filter(emp => {
-                    const deps = (emp as any).departments || emp.departmentIds || [];
-                    if (exportFilterDepartment.length > 0 && !exportFilterDepartment.some(d => deps.includes(d))) return false;
+                    if (exportFilterPrimaryDepartment) {
+                        const primDept = (emp as any).primaryDepartmentId;
+                        if (!primDept) return false;
+                        if (exportFilterDepartment.length > 0 && !exportFilterDepartment.includes(primDept)) return false;
+                    } else {
+                        const deps = (emp as any).departments || emp.departmentIds || [];
+                        if (exportFilterDepartment.length > 0 && !exportFilterDepartment.some(d => deps.includes(d))) return false;
+                    }
                     
                     const groups = (emp as any).employeeGroups || emp.employeeGroupIds || [];
                     if (exportFilterGroup.length > 0 && !exportFilterGroup.some(g => groups.includes(g))) return false;
@@ -3367,8 +3448,14 @@ const App: React.FC = () => {
             if (allEmployees.length === 0) setAllEmployees(employeesRaw);
             
             const employees = employeesRaw.filter(emp => {
-                const deps = (emp as any).departments || emp.departmentIds || [];
-                if (exportFilterDepartment.length > 0 && !exportFilterDepartment.some(d => deps.includes(d))) return false;
+                if (exportFilterPrimaryDepartment) {
+                    const primDept = (emp as any).primaryDepartmentId;
+                    if (!primDept) return false;
+                    if (exportFilterDepartment.length > 0 && !exportFilterDepartment.includes(primDept)) return false;
+                } else {
+                    const deps = (emp as any).departments || emp.departmentIds || [];
+                    if (exportFilterDepartment.length > 0 && !exportFilterDepartment.some(d => deps.includes(d))) return false;
+                }
                 
                 const groups = (emp as any).employeeGroups || emp.employeeGroupIds || [];
                 if (exportFilterGroup.length > 0 && !exportFilterGroup.some(g => groups.includes(g))) return false;
@@ -6405,8 +6492,14 @@ const App: React.FC = () => {
             
             const emp = allEmployeesMap.get(r.employeeId);
             if (emp) {
-                const deps = (emp as any).departments || emp.departmentIds || [];
-                if (filterDepartment.length > 0 && !filterDepartment.some(d => deps.includes(d))) return false;
+                if (filterPrimaryDepartment) {
+                    const primDept = (emp as any).primaryDepartmentId;
+                    if (!primDept) return false;
+                    if (filterDepartment.length > 0 && !filterDepartment.includes(primDept)) return false;
+                } else {
+                    const deps = (emp as any).departments || emp.departmentIds || [];
+                    if (filterDepartment.length > 0 && !filterDepartment.some(d => deps.includes(d))) return false;
+                }
                 
                 const groups = (emp as any).employeeGroups || emp.employeeGroupIds || [];
                 if (filterGroup.length > 0 && !filterGroup.some(g => groups.includes(g))) return false;
@@ -6418,7 +6511,7 @@ const App: React.FC = () => {
             
             return true;
         });
-    }, [reviews, searchReview, filterDepartment, filterGroup, filterType, allEmployeesMap, showOnlyIssues, editorErrorsMap, rawFileJson, getUpdateColumns, dateColumns]);
+    }, [reviews, searchReview, filterDepartment, filterPrimaryDepartment, filterGroup, filterType, allEmployeesMap, showOnlyIssues, editorErrorsMap, rawFileJson, getUpdateColumns, dateColumns]);
 
     const paginatedReviews = useMemo(() => {
         const actualRowsPerPage = rowsPerPage === 'ALL' ? Math.max(1, filteredReviews.length) : rowsPerPage;
@@ -6710,7 +6803,8 @@ const App: React.FC = () => {
 
     const changeValueForOptions = useMemo(() => {
         const options = Array.from(getUpdateColumns).map((col: string) => ({ value: col, label: col.replace("UPDATE - ", "") }));
-        if (definitions && definitions.departments.length > 0) {
+        const hasDepartmentColumn = Array.from(getUpdateColumns).some(col => col.startsWith('UPDATE - Department - '));
+        if (definitions && definitions.departments.length > 0 && hasDepartmentColumn) {
             options.unshift({ value: 'PRIMARY_DEPARTMENT', label: 'Primary Department' });
         }
         return options;
@@ -6726,6 +6820,13 @@ const App: React.FC = () => {
         const fieldConfig = bulkEditField ? getFieldConfig(bulkEditField.replace("UPDATE - ", ""), definitions) : null;
         return fieldConfig?.options ? fieldConfig.options.map((opt: string) => ({ value: opt, label: opt })) : null;
     }, [bulkEditField, definitions]);
+
+    useEffect(() => {
+        if (bulkEditField && !changeValueForOptions.some((opt: any) => opt.value === bulkEditField)) {
+            setBulkEditField('');
+            setBulkEditValue('');
+        }
+    }, [changeValueForOptions, bulkEditField]);
 
     const toggleSelectAll = (checked: boolean) => {
         const newSet = new Set(selectedReviewIds);
@@ -6856,10 +6957,19 @@ const App: React.FC = () => {
                                     {definitions ? (
                                         <div className="flex flex-wrap gap-4">
                                             <MultiSelectMenu 
-                                                label="Departments"
+                                                label="Department"
                                                 options={definitions.departments}
                                                 selectedIds={exportFilterDepartment}
                                                 onChange={setExportFilterDepartment}
+                                                toggleOptionEnabled={exportFilterPrimaryDepartment}
+                                                onToggleOption={setExportFilterPrimaryDepartment}
+                                                toggleOptionLabel="Primary Department"
+                                                toggleTooltipText={
+                                                    <>
+                                                        You can filter by Primary Department.<br/>
+                                                        <strong>Note:</strong> Employees without a designated primary department will not appear in the template file. To use this filter, ensure the feature is enabled and assigned to everyone.
+                                                    </>
+                                                }
                                             />
                                             <MultiSelectMenu 
                                                 label="Employee Group"
@@ -7308,6 +7418,15 @@ const App: React.FC = () => {
                                                         options={definitions.departments}
                                                         selectedIds={filterDepartment}
                                                         onChange={setFilterDepartment}
+                                                        toggleOptionEnabled={filterPrimaryDepartment}
+                                                        onToggleOption={setFilterPrimaryDepartment}
+                                                        toggleOptionLabel="Primary Department"
+                                                        toggleTooltipText={
+                                                            <>
+                                                                You can filter by Primary Department.<br/>
+                                                                <strong>Note:</strong> Employees without a designated primary department will not appear in the template file. To use this filter, ensure the feature is enabled and assigned to everyone.
+                                                            </>
+                                                        }
                                                     />
                                                     <MultiSelectMenu 
                                                         label="Employee Group"
@@ -7758,7 +7877,11 @@ const App: React.FC = () => {
                     onClose={() => setShowConfirmModal(false)}
                     onConfirm={handleUpdate}
                     title="Confirm Update"
-                    message={`The update process is about to start. Note that all ${reviews.filter(r => r.status !== 'no_updates').length} pending employee updates will be applied, not just the currently filtered ones. Are you ready to proceed?`}
+                    message={
+                        <>
+                            The update process is about to start. Note that <span className="text-blue-600 font-medium">{reviews.filter(r => r.status !== 'no_updates').length} employee(s) with updates pending</span> will be applied, not just the currently filtered ones. Are you ready to proceed?
+                        </>
+                    }
                     confirmText="Yes, I have finished reviewing the fields"
                     cancelText="Cancel"
                 />
