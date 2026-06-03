@@ -163,7 +163,7 @@ export async function fetchPaginatedData(endpoint: string): Promise<any[]> {
 }
 
 export async function fetchEmployees(): Promise<Employee[]> {
-    return fetchPaginatedData('/hr/v1.0/employees');
+    return fetchPaginatedData('/hr/v1.0/employees?special=BankAccount,BirthDate,Ssn');
 }
 
 export async function fetchEmployeeDetails(id: number): Promise<any> {

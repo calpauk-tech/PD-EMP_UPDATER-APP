@@ -2971,6 +2971,10 @@ const App: React.FC = () => {
     const [showEditorEditorInstructions, setShowEditorEditorInstructions] = useState(false);
     const [portalName, setPortalName] = useState<string | null>(null);
     const [showHelpModal, setShowHelpModal] = useState(false);
+    
+    // Stop process references
+    const abortProcessRef = useRef(false);
+    const [isStopModalOpen, setIsStopModalOpen] = useState(false);
 
     const [definitions, setDefinitions] = useState<DefinitionCollection | null>(null);
     // Add allEmployees state to cache fetching for mapping
@@ -3147,6 +3151,7 @@ const App: React.FC = () => {
     const [fieldMapping, setFieldMapping] = useState<Map<string, string>>(new Map());
 
     const [showConfirmModal, setShowConfirmModal] = useState(false);
+    const [isMissingFieldsExpanded, setIsMissingFieldsExpanded] = useState(false);
 
     const wakeLockRef = useRef<any>(null);
 
@@ -3442,9 +3447,16 @@ const App: React.FC = () => {
         setLoadingText("Fetching employee list...");
         setError(null);
         setProgress(0);
+        abortProcessRef.current = false;
+        setIsStopModalOpen(false);
         
         try {
             const employeesRaw = allEmployees.length > 0 ? allEmployees : await fetchEmployees();
+            if (abortProcessRef.current) {
+                setIsLoading(false);
+                setCurrentStep('configure');
+                return;
+            }
             if (allEmployees.length === 0) setAllEmployees(employeesRaw);
             
             const employees = employeesRaw.filter(emp => {
@@ -3473,6 +3485,11 @@ const App: React.FC = () => {
                 setLoadingText(`Fetching details for ${employees.length} employees (this may take time)...`);
                 const BATCH = 3; 
                 for (let i = 0; i < employees.length; i += BATCH) {
+                    if (abortProcessRef.current) {
+                        setIsLoading(false);
+                        setCurrentStep('configure');
+                        return;
+                    }
                     const batch = employees.slice(i, i + BATCH);
                     const currentCount = Math.min(i + BATCH, employees.length);
                     const p = Math.round((currentCount / employees.length) * 80) + 10;
@@ -3481,7 +3498,10 @@ const App: React.FC = () => {
                     
                     const promises = batch.map(async (emp) => {
                         const baseData = { ...emp }; 
-                        const details = await fetchEmployeeDetails(emp.id) || {};
+                        let details = {};
+                        if (selectedSections.custom) {
+                            details = await fetchEmployeeDetails(emp.id) || {};
+                        }
                         
                         let contract = null;
                         if (selectedSections.contract) contract = await fetchEmployeeContractRule(emp.id);
@@ -6705,6 +6725,46 @@ const App: React.FC = () => {
         setIsLoading(false);
     };
 
+    const missingRequiredFields = useMemo(() => {
+        if (!definitions || !definitions.requiredFields || !rawFileJson || currentStep !== 'review') return [];
+        if (getUpdateColumns.length === 0) return [];
+        
+        const missing: { fieldKey: string, label: string }[] = [];
+        
+        definitions.requiredFields.forEach(reqKey => {
+            if (['firstName', 'lastName', 'email'].includes(reqKey)) return;
+            
+            let label = '';
+            if (reqKey === 'birthDate') label = "Birth Date";
+            else if (reqKey === 'gender') label = "Gender";
+            else if (reqKey === 'ssn') label = "Tax ID";
+            else if (reqKey === 'street1') label = "Street 1";
+            else if (reqKey === 'street2') label = "Street 2";
+            else if (reqKey === 'zip') label = "Zip";
+            else if (reqKey === 'city') label = "City";
+            else if (reqKey === 'cellPhoneCountryCode') label = "Country Code";
+            else if (reqKey === 'cellPhone') label = "Mobile";
+            else if (reqKey === 'hiredFrom') label = "Start/hired Date";
+            else if (reqKey === 'jobTitle') label = "jobTitle";
+            else if (reqKey === 'employeeTypeId') label = "Employee Type";
+            else if (reqKey === 'bankReg') label = "System Bank Reg";
+            else if (reqKey === 'bankAcc') label = "System Bank Account Nr";
+            else if (reqKey === 'salaryIdentifier') label = "Salary Identifier (Payroll ID)";
+            else {
+                const cf = definitions.customFields.find(c => c.originalName === reqKey);
+                if (cf) label = cf.description;
+            }
+            
+            if (label) {
+                const tableKey = `UPDATE - ${label}`;
+                if (!getUpdateColumns.includes(tableKey)) {
+                    missing.push({ fieldKey: tableKey, label: label });
+                }
+            }
+        });
+        return missing;
+    }, [definitions, getUpdateColumns, rawFileJson, currentStep]);
+
     const availableFieldsToAddOptions = useMemo(() => {
         if (!definitions) return [];
         const updateColsSet = new Set(getUpdateColumns);
@@ -7075,6 +7135,15 @@ const App: React.FC = () => {
                                         label={populateData ? "Fetching Employee Data..." : "Generating Template..."}
                                     />
                                     <p className="text-center text-xs text-blue-500 mt-2">{loadingText}</p>
+                                    <div className="mt-8 flex justify-center">
+                                        <button 
+                                            onClick={() => setIsStopModalOpen(true)}
+                                            className="text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 font-bold rounded-lg text-sm px-6 py-2.5 transition-colors flex items-center gap-2 shadow-sm"
+                                        >
+                                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                            Stop Process
+                                        </button>
+                                    </div>
                                 </div>
                             ) : (
                                 <div className="bg-green-50 border border-green-200 p-8 rounded-xl text-center">
@@ -7108,15 +7177,19 @@ const App: React.FC = () => {
                                 </div>
                             )}
 
-                            <hr className="my-8 border-gray-100" />
-                            <div className="flex justify-start">
-                                <button 
-                                    onClick={() => setCurrentStep(definitions ? 'select_fields' : 'configure')} 
-                                    className="text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 font-medium rounded-lg text-sm px-5 py-2.5 text-center inline-flex items-center"
-                                >
-                                    &larr; Back
-                                </button>
-                            </div>
+                            {!isLoading && (
+                                <>
+                                    <hr className="my-8 border-gray-100" />
+                                    <div className="flex justify-start">
+                                        <button 
+                                            onClick={() => setCurrentStep(definitions ? 'select_fields' : 'configure')} 
+                                            className="text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 font-medium rounded-lg text-sm px-5 py-2.5 text-center inline-flex items-center"
+                                        >
+                                            &larr; Back
+                                        </button>
+                                    </div>
+                                </>
+                            )}
                         </div>
                     )}
 
@@ -7296,6 +7369,57 @@ const App: React.FC = () => {
                                             />
                                         </div>
                                     </div>
+
+                                    {missingRequiredFields.length > 0 && (
+                                        <div className="mt-2 bg-orange-50 border border-orange-200 rounded-lg overflow-hidden">
+                                            <div 
+                                                className="p-4 flex items-center justify-between cursor-pointer hover:bg-orange-100/50 transition-colors"
+                                                onClick={() => setIsMissingFieldsExpanded(!isMissingFieldsExpanded)}
+                                            >
+                                                <div className="flex items-center gap-2">
+                                                    <h4 className="font-bold text-orange-900 m-0">Required HR fields found in the portal</h4>
+                                                    <span className="bg-orange-200 text-orange-800 text-xs font-bold px-2 py-0.5 rounded-full">
+                                                        {missingRequiredFields.length}
+                                                    </span>
+                                                </div>
+                                                <button className="text-orange-800 font-medium text-sm flex items-center gap-1">
+                                                    {isMissingFieldsExpanded ? (
+                                                        <>Read less <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 15l7-7 7 7"></path></svg></>
+                                                    ) : (
+                                                        <>Read more <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg></>
+                                                    )}
+                                                </button>
+                                            </div>
+                                            
+                                            {isMissingFieldsExpanded && (
+                                                <div className="p-4 pt-0 border-t border-orange-200/50">
+                                                    <p className="text-sm text-orange-800 mb-3 leading-relaxed mt-3">
+                                                        <strong>Note:</strong> This portal has required HR fields in the employee form.
+                                                        <br/>
+                                                        If an employee's profile is currently missing required information, the update of HR data will fail. To fix this, you must either provide the missing value in the update table, or change the field's required status inside your Planday employee form settings.
+                                                        <br/>
+                                                        If all employees already have these fields filled out, no action is required and you do not need to include these fields in the update table.
+                                                    </p>
+                                                    <ul className="space-y-2">
+                                                        {missingRequiredFields.map(mf => (
+                                                            <li key={mf.fieldKey} className="flex items-center justify-between bg-white px-3 py-2 rounded border border-orange-100 shadow-sm max-w-lg">
+                                                                <span className="text-sm font-medium text-gray-700">{mf.label}</span>
+                                                                <button 
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        handleAddField(mf.fieldKey);
+                                                                    }}
+                                                                    className="text-xs bg-orange-100 hover:bg-orange-200 text-orange-800 font-bold py-1 px-3 rounded transition-colors"
+                                                                >
+                                                                    Add
+                                                                </button>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
 
                                     <div className="flex flex-col gap-4 bg-white p-4 rounded-lg border border-gray-200 mt-4">
                                         <div className="flex items-center gap-2 border-b pb-2">
@@ -7963,6 +8087,35 @@ const App: React.FC = () => {
                 isOpen={showHelpModal} 
                 onClose={() => setShowHelpModal(false)}
             />
+            {/* Stop Confirmation Modal */}
+            {isStopModalOpen && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900 bg-opacity-50 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 text-center transform transition-all">
+                        <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <AlertIcon className="w-8 h-8" />
+                        </div>
+                        <h3 className="text-xl font-bold text-gray-900 mb-2">Stop Process?</h3>
+                        <p className="text-gray-600 mb-6 font-medium">Are you sure you want to stop generating the template? If you do, the process will be canceled completely.</p>
+                        <div className="flex flex-col sm:flex-row justify-center gap-4">
+                            <button 
+                                onClick={() => setIsStopModalOpen(false)}
+                                className="bg-white border border-gray-300 text-gray-700 px-6 py-2.5 rounded-lg font-bold hover:bg-gray-50 transition-colors"
+                            >
+                                No, return to wait
+                            </button>
+                            <button 
+                                onClick={() => {
+                                    abortProcessRef.current = true;
+                                    setIsStopModalOpen(false);
+                                }}
+                                className="bg-red-600 text-white px-6 py-2.5 rounded-lg font-bold hover:bg-red-700 transition-colors shadow-sm"
+                            >
+                                Yes, stop process
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
             <AppInfoFooter />
         </div>
     );
