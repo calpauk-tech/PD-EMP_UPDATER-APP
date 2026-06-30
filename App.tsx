@@ -200,6 +200,7 @@ const AlertIcon: React.FC<{ className?: string }> = ({ className }) => (<svg cla
 const CloudUploadIcon: React.FC<{ className?: string }> = ({ className }) => (<svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>);
 const UserGroupIcon: React.FC<{ className?: string }> = ({ className }) => (<svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>);
 const BadgeIdIcon: React.FC<{ className?: string }> = ({ className }) => (<svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0c0 .884-.5 1.5-1 1.5a1 1 0 01-1-1.5zm0 0c0 .884.5 1.5 1 1.5a1 1 0 001-1.5" /></svg>);
+const ArrowRightIcon: React.FC<{ className?: string }> = ({ className }) => (<svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>);
 
 
 // --- UI Components ---
@@ -285,8 +286,10 @@ const ConfirmModal: React.FC<{
     title: string; 
     message: string | React.ReactNode; 
     confirmText: string; 
-    cancelText: string 
-}> = ({ isOpen, onClose, onConfirm, title, message, confirmText, cancelText }) => {
+    cancelText: string;
+    secondaryConfirmAction?: () => void;
+    secondaryConfirmText?: string;
+}> = ({ isOpen, onClose, onConfirm, title, message, confirmText, cancelText, secondaryConfirmAction, secondaryConfirmText }) => {
     if (!isOpen) return null;
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-50 backdrop-blur-sm p-4 transition-opacity">
@@ -301,6 +304,14 @@ const ConfirmModal: React.FC<{
                         >
                             {cancelText}
                         </button>
+                        {secondaryConfirmAction && secondaryConfirmText && (
+                            <button 
+                                onClick={() => { secondaryConfirmAction(); onClose(); }}
+                                className="px-5 py-2.5 rounded-lg text-white bg-blue-600 hover:bg-blue-700 font-bold transition-colors focus:ring-2 focus:ring-blue-300 focus:outline-none"
+                            >
+                                {secondaryConfirmText}
+                            </button>
+                        )}
                         <button 
                             onClick={() => { onConfirm(); onClose(); }}
                             className="px-5 py-2.5 rounded-lg text-white bg-green-600 hover:bg-green-700 font-bold transition-colors focus:ring-2 focus:ring-green-300 focus:outline-none"
@@ -595,11 +606,23 @@ const SearchableSelect: React.FC<{
                         return (
                             <div 
                                 key={opt.value} 
-                                className={`p-2 rounded cursor-pointer text-sm mb-0.5 flex justify-between items-center 
-                                    ${String(opt.value) === String(value) ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}
-                                    ${isUsed ? 'opacity-50' : ''}
+                                className={`p-2 rounded text-sm mb-0.5 flex justify-between items-center transition-colors
+                                    ${String(opt.value) === String(value) ? 'bg-blue-50 text-blue-700 font-medium cursor-default' : 
+                                      isUsed ? 'bg-gray-50 opacity-60 cursor-not-allowed text-gray-500' : 'text-gray-700 hover:bg-gray-50 cursor-pointer'}
                                 `}
-                                onClick={() => { onChange(String(opt.value)); setIsOpen(false); }}
+                                onClick={(e) => { 
+                                    if (isUsed) {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        return;
+                                    }
+                                    if (String(opt.value) === String(value)) {
+                                        setIsOpen(false);
+                                        return;
+                                    }
+                                    onChange(String(opt.value)); 
+                                    setIsOpen(false); 
+                                }}
                             >
                                 <span className={isUsed ? 'line-through decoration-gray-400' : ''}>
                                     {opt.label}
@@ -858,6 +881,7 @@ interface ValidationError {
     field: string;
     fullKey?: string;
     value: string;
+    originalValue?: string;
     allowed: string[];
 }
 
@@ -865,11 +889,12 @@ const ValidationErrorsView: React.FC<{
     errors: ValidationError[]; 
     onBack: () => void;
     onUpdateValue: (rawRowIndex: number, fullKey: string, newValue: string) => void;
+    onBulkUpdateValues: (updates: {rawRowIndex: number, fullKey: string, newValue: string}[]) => void;
     onRevalidate: () => void;
-    onSkipFields: () => void;
+    onSkipFields: (generateLog: boolean) => void;
     onContinueWithErrors?: () => void;
     validationSource?: 'upload' | 'review';
-}> = ({ errors, onBack, onUpdateValue, onRevalidate, onSkipFields, onContinueWithErrors, validationSource }) => {
+}> = ({ errors, onBack, onUpdateValue, onBulkUpdateValues, onRevalidate, onSkipFields, onContinueWithErrors, validationSource }) => {
     const [showSkipConfirm, setShowSkipConfirm] = useState(false);
 
     const canEdit = (item: ValidationError) => {
@@ -883,8 +908,116 @@ const ValidationErrorsView: React.FC<{
         if (item.allowed.length === 0) return false;
         if (item.allowed[0].includes("Valid Date")) return false;
         if (item.allowed[0].includes("Must provide")) return false;
+        if (item.allowed[0].includes("Numeric")) return false;
+        if (item.allowed[0].includes("Unique")) return false;
+        if (item.allowed[0].includes("Digits only")) return false;
         return true;
     };
+
+    const isNumeric = (item: ValidationError) => {
+        if (!canEdit(item)) return false;
+        if (item.allowed.length === 0) return false;
+        return item.allowed.some(opt => opt.includes("Numeric") || opt.includes("Digits"));
+    };
+
+    const getRecommendation = (item: ValidationError): string | null => {
+        if (!isDropdown(item) || !item.value) return null;
+        
+        // Hide recommendation if value is already a perfectly matched valid option
+        if (item.allowed.some(a => a.toLowerCase() === item.value?.toLowerCase())) return null;
+
+        const isCheckboxLabel = item.allowed.includes("x") || item.allowed.includes("xx");
+        if (isCheckboxLabel) {
+            // Checkbox fields: suggest 'x' by default if there's an invalid value
+            if (item.allowed.includes("x")) return "x";
+            if (item.allowed.includes("xx")) return "xx";
+            return null;
+        }
+
+        let bestScore = 0;
+        let bestMatch = null;
+        const searchStr = item.value.toLowerCase().trim();
+
+        // Specific Country Code handling
+        if (item.field === 'Country Code') {
+            const countryMap: Record<string, string> = {
+                "denmark": "DK", "united kingdom": "UK", "great britain": "UK", "england": "UK", "scotland": "UK",
+                "norway": "NO", "sweden": "SE", "germany": "DE", "united states": "US", "usa": "US",
+                "poland": "PL", "vietnam": "VN", "france": "FR", "spain": "ES", "greenland": "GL",
+                "italy": "IT", "netherlands": "NL", "holland": "NL", "switzerland": "CH", "belgium": "BE",
+                "austria": "AT", "finland": "FI", "iceland": "IS", "australia": "AU", "lithuania": "LT",
+                "argentina": "AR", "bahamas": "BS", "barbados": "BB", "belarus": "BY", "brazil": "BR",
+                "bulgaria": "BG", "cambodia": "KH", "canada": "CA", "chile": "CL", "china": "CN",
+                "czech republic": "CZ", "czechia": "CZ", "dominican republic": "DO", "ecuador": "EC",
+                "egypt": "EG", "estonia": "EE", "falkland islands": "FK", "georgia": "GE", "greece": "GR",
+                "grenada": "GD", "hong kong": "HK", "hungary": "HU", "india": "IN", "ireland": "IE",
+                "israel": "IL", "jamaica": "JM", "japan": "JP", "south korea": "KR", "kuwait": "KW",
+                "latvia": "LV", "lebanon": "LB", "luxembourg": "LU", "macau": "MO", "malaysia": "MY",
+                "maldives": "MV", "malta": "MT", "mexico": "MX", "morocco": "MA", "new zealand": "NZ",
+                "paraguay": "PY", "peru": "PE", "philippines": "PH", "portugal": "PT", "puerto rico": "PR",
+                "romania": "RO", "russia": "RU", "singapore": "SG", "south africa": "ZA", "sri lanka": "LK",
+                "taiwan": "TW", "thailand": "TH", "tunisia": "TN", "turkey": "TR", "ukraine": "UA",
+                "united arab emirates": "AE", "uae": "AE", "uruguay": "UY", "venezuela": "VE",
+                "gibraltar": "GI", "faroe islands": "FO", "nigeria": "NG", "slovakia": "SK", "nepal": "NP",
+                "ghana": "GH", "eritrea": "ER", "mali": "ML", "tanzania": "TZ", "iran": "IR",
+                "pakistan": "PK", "syria": "SY", "albania": "AL", "indonesia": "ID", "serbia": "RS",
+                "croatia": "HR", "slovenia": "SI", "trinidad": "TT", "bosnia": "BA", "macedonia": "MK",
+                "montenegro": "ME", "kosovo": "XK", "sierra leone": "SL", "bolivia": "BO", "algeria": "DZ",
+                "ivory coast": "CI", "bangladesh": "BD", "cyprus": "CY", "malawi": "MW", "mongolia": "MN",
+                "cameroon": "CM", "uganda": "UG", "qatar": "QA", "congo": "CG", "kenya": "KE",
+                "saudi arabia": "SA", "colombia": "CO", "myanmar": "MM", "burma": "MM", "gambia": "GM",
+                "fiji": "FJ", "zimbabwe": "ZW", "sudan": "SD", "angola": "AO", "yemen": "YE",
+                "mauritius": "MU", "rwanda": "RW", "botswana": "BW", "reunion": "RE", "honduras": "HN",
+                "ethiopia": "ET", "libya": "LY", "moldova": "MD", "somalia": "SO", "afghanistan": "AF",
+                "cuba": "CU", "costa rica": "CR", "zambia": "ZM", "iraq": "IQ", "st lucia": "LC",
+                "senegal": "SN", "laos": "LA", "guinea": "GN"
+            };
+
+            for (const [name, iso] of Object.entries(countryMap)) {
+                const score = calculateSimilarity(searchStr, name);
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestMatch = iso;
+                }
+            }
+            if (bestScore >= 0.7 && bestMatch && item.allowed.includes(bestMatch)) {
+                return bestMatch;
+            }
+        }
+
+        bestScore = 0;
+        bestMatch = null;
+        item.allowed.forEach(opt => {
+            const score = calculateSimilarity(searchStr, opt.toLowerCase().trim());
+            if (score > bestScore) {
+                bestScore = score;
+                bestMatch = opt;
+            }
+        });
+
+        // Use a slightly looser threshold or SIMILARITY_THRESHOLD for matching
+        if (bestScore >= 0.7 && bestMatch) {
+            return bestMatch;
+        }
+
+        return null;
+    };
+
+    const handleApplyToAllErrorFields = (field: string, suggestion: string, sourceValue: string) => {
+        // Collect updates for all errors in this field that share the same invalid value
+        const updates: {rawRowIndex: number, fullKey: string, newValue: string}[] = [];
+        errors.forEach(err => {
+            if (err.field === field && err.value === sourceValue && canEdit(err) && err.fullKey) {
+                updates.push({ rawRowIndex: err.rawRowIndex, fullKey: err.fullKey, newValue: suggestion });
+            }
+        });
+        if (updates.length > 0) {
+            onBulkUpdateValues(updates);
+        }
+    };
+    
+    // Store custom selections for the "Apply to all with"
+    const [customAllSelections, setCustomAllSelections] = useState<Record<string, string>>({});
 
     return (
         <div className="bg-white p-8 rounded-xl shadow-lg border border-red-100 max-w-6xl mx-auto">
@@ -924,25 +1057,145 @@ const ValidationErrorsView: React.FC<{
                                     <td className="p-3">
                                         {canEdit(item) ? (
                                             isDropdown(item) ? (
-                                                <select
-                                                    value={item.value || ""}
-                                                    onChange={e => onUpdateValue(item.rawRowIndex, item.fullKey!, e.target.value)}
-                                                    className="w-full text-red-700 border border-red-300 rounded p-1 text-sm bg-white"
-                                                >
-                                                    <option value={item.value} disabled>{item.value || "Empty"}</option>
-                                                    <option value="">-- Clear --</option>
-                                                    {item.allowed.map(opt => (
-                                                        <option key={opt} value={opt}>{opt}</option>
-                                                    ))}
-                                                </select>
+                                                <div className="flex flex-col gap-2">
+                                                    <select
+                                                        value={item.value || ""}
+                                                        onChange={e => onUpdateValue(item.rawRowIndex, item.fullKey!, e.target.value)}
+                                                        className="w-full text-red-700 border border-red-300 rounded p-1 text-sm bg-white"
+                                                    >
+                                                        <option value={item.value} disabled>{item.value || "Empty"}</option>
+                                                        <option value="">-- Clear --</option>
+                                                        {item.allowed.map(opt => (
+                                                            <option key={opt} value={opt}>{opt}</option>
+                                                        ))}
+                                                    </select>
+                                                    {(() => {
+                                                        const bestMatch = getRecommendation(item);
+                                                        
+                                                        // Count identical issues
+                                                        const sameIssueCount = errors.filter(e => e.field === item.field && e.value === item.value && canEdit(e)).length;
+                                                        const hasIdenticalIssues = sameIssueCount > 1;
+                                                        const isValueInvalid = item.value && !item.allowed.some(a => a.toLowerCase() === item.value?.toLowerCase());
+                                                        
+                                                        const customKey = `${item.field}-${item.value}`;
+                                                        const custVal = customAllSelections[customKey] || "";
+
+                                                        if (!isValueInvalid) return null;
+
+                                                        if ((bestMatch && item.value !== bestMatch) || hasIdenticalIssues) {
+                                                            return (
+                                                                <div className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded p-2 flex flex-col gap-1.5 mt-1">
+                                                                    {bestMatch && item.value !== bestMatch && (
+                                                                        <span><strong>Recommend:</strong> <span className="font-semibold">{bestMatch}</span></span>
+                                                                    )}
+                                                                    <div className="flex flex-col gap-1">
+                                                                        {bestMatch && item.value !== bestMatch && (
+                                                                            <button 
+                                                                                onClick={() => onUpdateValue(item.rawRowIndex, item.fullKey!, bestMatch)} 
+                                                                                className="bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded text-left transition-colors"
+                                                                            >
+                                                                                Apply to this row
+                                                                            </button>
+                                                                        )}
+                                                                        {bestMatch && item.value !== bestMatch && hasIdenticalIssues && (
+                                                                            <button 
+                                                                                onClick={() => handleApplyToAllErrorFields(item.field, bestMatch, item.value)} 
+                                                                                className="bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded text-left transition-colors"
+                                                                            >
+                                                                                Apply to all with "{item.value}" ({sameIssueCount} employees)
+                                                                            </button>
+                                                                        )}
+                                                                        
+                                                                        {hasIdenticalIssues && (
+                                                                            <div className="mt-1 pt-1 border-t border-blue-200 flex flex-col gap-1">
+                                                                                <div className="flex gap-1 items-center">
+                                                                                    <span className="shrink-0 font-medium">Custom:</span>
+                                                                                    <select
+                                                                                        value={custVal}
+                                                                                        onChange={e => setCustomAllSelections({...customAllSelections, [customKey]: e.target.value})}
+                                                                                        className="text-blue-800 border-blue-300 rounded p-0.5 text-xs bg-white flex-1 min-w-0"
+                                                                                    >
+                                                                                        <option value="" disabled>Choose...</option>
+                                                                                        {item.allowed.map(opt => (
+                                                                                            <option key={opt} value={opt}>{opt}</option>
+                                                                                        ))}
+                                                                                    </select>
+                                                                                </div>
+                                                                                {custVal && (
+                                                                                    <button 
+                                                                                        onClick={() => handleApplyToAllErrorFields(item.field, custVal, item.value)} 
+                                                                                        className="bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded text-left transition-colors font-medium text-blue-800"
+                                                                                    >
+                                                                                        Apply "{custVal}" to all ({sameIssueCount} employees)
+                                                                                    </button>
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        }
+                                                        
+                                                        return null;
+                                                    })()}
+                                                </div>
                                             ) : (
-                                                <input
-                                                    type="text"
-                                                    value={item.value || ""}
-                                                    onChange={e => onUpdateValue(item.rawRowIndex, item.fullKey!, e.target.value)}
-                                                    className="w-full text-red-700 border border-red-300 rounded p-1 text-sm bg-white placeholder-red-300"
-                                                    placeholder="Enter valid value"
-                                                />
+                                                <div className="flex flex-col gap-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <input
+                                                            type={isNumeric(item) ? "number" : "text"}
+                                                            value={item.value || ""}
+                                                            onChange={e => onUpdateValue(item.rawRowIndex, item.fullKey!, e.target.value)}
+                                                            className="w-full text-red-700 border border-red-300 rounded p-1 text-sm bg-white placeholder-red-300"
+                                                            placeholder="Enter valid value"
+                                                        />
+                                                        {isNumeric(item) && (item.originalValue !== undefined) && (
+                                                            <span className="text-xs text-red-500 whitespace-nowrap bg-red-50 px-1.5 py-0.5 rounded border border-red-100" title="Original invalid value">
+                                                                <span className="line-through">{item.originalValue}</span>
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {(() => {
+                                                        const sameIssueCount = errors.filter(e => e.field === item.field && e.value === item.value && canEdit(e)).length;
+                                                        
+                                                        let isValueInvalid = true;
+                                                        if (isNumeric(item)) {
+                                                            isValueInvalid = isNaN(Number(item.value)) || String(item.value).trim() === '';
+                                                        } else {
+                                                            isValueInvalid = item.value ? !item.allowed.some(a => a.toLowerCase() === item.value?.toLowerCase()) : true;
+                                                        }
+
+                                                        if (sameIssueCount > 1 && isValueInvalid) {
+                                                            const customKey = `${item.field}-${item.value}`;
+                                                            const custVal = customAllSelections[customKey] || "";
+                                                            return (
+                                                                <div className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded p-2 flex flex-col gap-1.5 mt-1">
+                                                                    <div className="flex flex-col gap-1">
+                                                                        <div className="flex gap-1 items-center">
+                                                                            <span className="shrink-0 font-medium">Custom:</span>
+                                                                            <input
+                                                                                type={isNumeric(item) ? "number" : "text"}
+                                                                                value={custVal}
+                                                                                onChange={e => setCustomAllSelections({...customAllSelections, [customKey]: e.target.value})}
+                                                                                className="text-blue-800 border-blue-300 rounded p-0.5 text-xs bg-white flex-1 min-w-0"
+                                                                                placeholder="Enter value"
+                                                                            />
+                                                                        </div>
+                                                                        {custVal && (
+                                                                            <button 
+                                                                                onClick={() => handleApplyToAllErrorFields(item.field, custVal, item.value)} 
+                                                                                className="bg-blue-100 hover:bg-blue-200 px-2 py-1 rounded text-left transition-colors font-medium text-blue-800"
+                                                                            >
+                                                                                Apply "{custVal}" to all ({sameIssueCount} employees)
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        }
+                                                        return null;
+                                                    })()}
+                                                </div>
                                             )
                                         ) : (
                                             <span className="text-red-600 font-mono bg-red-50 rounded px-1">{item.value}</span>
@@ -976,13 +1229,7 @@ const ValidationErrorsView: React.FC<{
                 </button>
                 <div className="flex items-center gap-3">
                     <button 
-                        onClick={() => {
-                            if (validationSource === 'review') {
-                                setShowSkipConfirm(true);
-                            } else {
-                                onSkipFields();
-                            }
-                        }} 
+                        onClick={() => setShowSkipConfirm(true)} 
                         className="bg-white text-gray-700 border border-gray-300 px-5 py-2.5 rounded-lg font-medium hover:bg-gray-50 flex items-center transition-colors"
                     >
                         Skip Invalid Fields
@@ -1009,11 +1256,252 @@ const ValidationErrorsView: React.FC<{
             <ConfirmModal 
                 isOpen={showSkipConfirm}
                 onClose={() => setShowSkipConfirm(false)}
-                onConfirm={onSkipFields}
+                onConfirm={() => {
+                    onSkipFields(true);
+                    setShowSkipConfirm(false);
+                }}
                 title="Skip Invalid Fields"
-                message="The invalid field values will be removed, and you will be taken back to the table editor to review changes. Continue?"
-                confirmText="Yes, skip and continue"
+                message="Do you wish to have a log file generated of skipped employee fields? All invalid fields will form part of the remaining updates, with their values skipped."
+                confirmText="Yes, Download Log & Skip"
+                secondaryConfirmText="Skip Without Logging"
+                secondaryConfirmAction={() => {
+                    onSkipFields(false);
+                    setShowSkipConfirm(false);
+                }}
                 cancelText="Cancel"
+            />
+        </div>
+    );
+};
+
+// --- Wage Type Selection Component ---
+interface WageTypeSelectionProps {
+    missingGroups: string[];
+    hasExistingWageTypes: boolean;
+    onComplete: (selections: Map<string, string>, overwrite: boolean) => void;
+    onBack: () => void;
+}
+
+const WageTypeSelection: React.FC<WageTypeSelectionProps> = ({ missingGroups, hasExistingWageTypes, onComplete, onBack }) => {
+    const [globalMode, setGlobalMode] = useState<'HourlyRate' | 'ShiftRate' | 'PER_GROUP' | null>(null);
+    const [groupSelections, setGroupSelections] = useState<Map<string, string>>(new Map());
+    const [showConfirm, setShowConfirm] = useState<'ALL_HOURLY' | 'ALL_SHIFT' | 'CLEAR_ALL' | 'CONTINUE' | null>(null);
+    const [formError, setFormError] = useState<string | null>(null);
+
+    const handleCheck = (group: string, type: 'HourlyRate' | 'ShiftRate') => {
+        const newMap = new Map(groupSelections);
+        if (newMap.get(group) === type) {
+            newMap.delete(group);
+        } else {
+            newMap.set(group, type);
+        }
+        setGroupSelections(newMap);
+        setFormError(null);
+    };
+
+    const isAllSelected = (type: 'HourlyRate' | 'ShiftRate') => {
+        return missingGroups.every(g => groupSelections.get(g) === type);
+    };
+
+    const handleSelectAll = (type: 'HourlyRate' | 'ShiftRate') => {
+        if (isAllSelected(type)) {
+            setShowConfirm('CLEAR_ALL');
+        } else {
+            setShowConfirm(type === 'HourlyRate' ? 'ALL_HOURLY' : 'ALL_SHIFT');
+        }
+        setFormError(null);
+    };
+
+    const submitSelections = (overwrite: boolean) => {
+        if (globalMode === 'HourlyRate' || globalMode === 'ShiftRate') {
+            const result = new Map<string, string>();
+            missingGroups.forEach(g => result.set(g, globalMode));
+            onComplete(result, overwrite);
+        } else if (globalMode === 'PER_GROUP') {
+            onComplete(groupSelections, overwrite);
+        }
+    };
+
+    const confirmAction = () => {
+        if (showConfirm === 'CONTINUE') {
+            submitSelections(true); // Default action if no secondary is shown, or "Overwrite" is clicked
+            setShowConfirm(null);
+            return;
+        }
+
+        const newMap = new Map(groupSelections);
+        if (showConfirm === 'CLEAR_ALL') {
+            missingGroups.forEach(g => newMap.delete(g));
+        } else if (showConfirm === 'ALL_HOURLY') {
+            missingGroups.forEach(g => newMap.set(g, 'HourlyRate'));
+        } else if (showConfirm === 'ALL_SHIFT') {
+            missingGroups.forEach(g => newMap.set(g, 'ShiftRate'));
+        }
+        setGroupSelections(newMap);
+        setShowConfirm(null);
+    };
+
+    const handleContinue = () => {
+        if (globalMode === 'HourlyRate' || globalMode === 'ShiftRate') {
+            setShowConfirm('CONTINUE');
+            return;
+        }
+
+        if (globalMode === 'PER_GROUP') {
+            const missing = missingGroups.find(g => !groupSelections.has(g));
+            if (missing) {
+                setFormError(`Please select a wage type for the group: ${missing}`);
+                return;
+            }
+            setShowConfirm('CONTINUE');
+        }
+    };
+
+    return (
+        <div className="bg-white p-8 rounded-xl shadow-lg border border-gray-100 max-w-2xl mx-auto">
+             <h2 className="text-2xl font-bold mb-4">Select Wage Type</h2>
+             <p className="text-gray-500 mb-6">
+                Should all rates for these groups be set as HourlyRate, ShiftRate, or would you like to set wage type per employee group? Note that this only applies to mapped rates.
+             </p>
+
+            <div className="space-y-4 mb-8">
+                <div 
+                   className={`border rounded-lg p-4 cursor-pointer transition-all ${globalMode === 'HourlyRate' ? 'ring-2 ring-blue-500 bg-blue-50 border-blue-500' : 'border-gray-200 hover:border-gray-300'}`}
+                   onClick={() => setGlobalMode('HourlyRate')}
+                >
+                    <div className="flex items-start gap-3">
+                        <div className={`w-5 h-5 mt-1 rounded-full border flex items-center justify-center ${globalMode === 'HourlyRate' ? 'border-blue-600' : 'border-gray-400'}`}>
+                            {globalMode === 'HourlyRate' && <div className="w-2.5 h-2.5 bg-blue-600 rounded-full" />}
+                        </div>
+                        <div className="flex-1">
+                            <div className="font-bold flex items-center gap-2">Set all to Hourly Rate</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div 
+                   className={`border rounded-lg p-4 cursor-pointer transition-all ${globalMode === 'ShiftRate' ? 'ring-2 ring-blue-500 bg-blue-50 border-blue-500' : 'border-gray-200 hover:border-gray-300'}`}
+                   onClick={() => setGlobalMode('ShiftRate')}
+                >
+                    <div className="flex items-start gap-3">
+                        <div className={`w-5 h-5 mt-1 rounded-full border flex items-center justify-center ${globalMode === 'ShiftRate' ? 'border-blue-600' : 'border-gray-400'}`}>
+                            {globalMode === 'ShiftRate' && <div className="w-2.5 h-2.5 bg-blue-600 rounded-full" />}
+                        </div>
+                        <div className="flex-1">
+                            <div className="font-bold flex items-center gap-2">Set all to Shift Rate</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div 
+                   className={`border rounded-lg p-4 cursor-pointer transition-all ${globalMode === 'PER_GROUP' ? 'ring-2 ring-blue-500 bg-blue-50 border-blue-500' : 'border-gray-200 hover:border-gray-300'}`}
+                   onClick={() => setGlobalMode('PER_GROUP')}
+                >
+                    <div className="flex items-start gap-3">
+                        <div className={`w-5 h-5 mt-1 rounded-full border flex items-center justify-center ${globalMode === 'PER_GROUP' ? 'border-blue-600' : 'border-gray-400'}`}>
+                            {globalMode === 'PER_GROUP' && <div className="w-2.5 h-2.5 bg-blue-600 rounded-full" />}
+                        </div>
+                        <div className="flex-1">
+                            <div className="font-bold flex items-center gap-2">Set wage type per employee group</div>
+                            
+                            {globalMode === 'PER_GROUP' && (
+                                <div className="mt-4 bg-white p-4 rounded border border-gray-200" onClick={e => e.stopPropagation()}>
+                                    <table className="w-full text-sm text-left text-gray-500 table-fixed">
+                                        <thead className="text-xs text-gray-700 uppercase bg-gray-50 border-b border-gray-200">
+                                            <tr>
+                                                <th className="px-4 py-3 w-1/2">Employee Group</th>
+                                                <th className="px-4 py-3 text-center">
+                                                    <div>Hourly Rate</div>
+                                                    <button onClick={() => handleSelectAll('HourlyRate')} className="text-blue-600 hover:underline text-xs capitalize mt-1 font-normal">
+                                                        {isAllSelected('HourlyRate') ? 'Deselect all' : 'Select all'}
+                                                    </button>
+                                                </th>
+                                                <th className="px-4 py-3 text-center">
+                                                    <div>Shift Rate</div>
+                                                    <button onClick={() => handleSelectAll('ShiftRate')} className="text-blue-600 hover:underline text-xs capitalize mt-1 font-normal">
+                                                        {isAllSelected('ShiftRate') ? 'Deselect all' : 'Select all'}
+                                                    </button>
+                                                </th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {missingGroups.map((group, idx) => {
+                                                const sel = groupSelections.get(group);
+                                                const hasSel = !!sel;
+                                                return (
+                                                    <tr key={idx} className={`border-b border-gray-100 ${!hasSel ? 'bg-red-50/50' : 'hover:bg-gray-50'}`}>
+                                                        <td className="px-4 py-3 font-medium text-gray-900 border-r border-gray-100 text-ellipsis overflow-hidden whitespace-nowrap" title={group}>
+                                                            {group}
+                                                        </td>
+                                                        <td className="px-4 py-3 text-center border-r border-gray-100">
+                                                            <input 
+                                                                type="checkbox" 
+                                                                checked={sel === 'HourlyRate'} 
+                                                                onChange={() => handleCheck(group, 'HourlyRate')}
+                                                                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
+                                                            />
+                                                        </td>
+                                                        <td className="px-4 py-3 text-center">
+                                                            <input 
+                                                                type="checkbox" 
+                                                                checked={sel === 'ShiftRate'} 
+                                                                onChange={() => handleCheck(group, 'ShiftRate')}
+                                                                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
+                                                            />
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div className="flex justify-between items-center bg-gray-50 -mx-8 -mb-8 p-4 rounded-b-xl border-t border-gray-100">
+                 <button onClick={onBack} className="text-gray-600 font-medium hover:text-gray-900 px-4 py-2">
+                     Back
+                 </button>
+                 <div className="flex items-center gap-4">
+                     {formError && <span className="text-red-600 text-sm font-medium">{formError}</span>}
+                     <button 
+                         onClick={handleContinue} 
+                         disabled={!globalMode}
+                         className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold transition-all shadow-sm ${!globalMode ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-md'}`}
+                     >
+                         Continue <ArrowRightIcon className="w-5 h-5" />
+                     </button>
+                 </div>
+            </div>
+
+            <ConfirmModal 
+                isOpen={showConfirm !== null}
+                onClose={() => setShowConfirm(null)}
+                onConfirm={confirmAction}
+                title={
+                    showConfirm === 'CONTINUE' 
+                        ? (hasExistingWageTypes ? "Existing Wage Types Detected" : "Review Wage Types")
+                        : "Confirm Bulk Action"
+                }
+                message={
+                    showConfirm === 'CONTINUE' 
+                        ? (hasExistingWageTypes 
+                            ? "Some employees already have an assigned wage type in the file. Would you like to overwrite the existing wage types or leave these unchanged for the respective employee groups?"
+                            : "Have you reviewed all the wage types for each group?")
+                        : showConfirm === 'CLEAR_ALL' 
+                            ? "Are you sure you want to deselect all wage types?" 
+                            : `Are you sure you want to select ${showConfirm === 'ALL_HOURLY' ? 'Hourly Rate' : 'Shift Rate'} for all groups? This will clear any previously set wage types.`
+                }
+                confirmText={showConfirm === 'CONTINUE' ? (hasExistingWageTypes ? "Overwrite" : "Yes, continue") : "Yes, apply"}
+                cancelText="Cancel"
+                secondaryConfirmAction={showConfirm === 'CONTINUE' && hasExistingWageTypes ? () => {
+                    submitSelections(false);
+                    setShowConfirm(null);
+                } : undefined}
+                secondaryConfirmText={showConfirm === 'CONTINUE' && hasExistingWageTypes ? "Keep" : undefined}
             />
         </div>
     );
@@ -1028,7 +1516,7 @@ interface IdentitySelectorProps {
 }
 
 const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, onBack }) => {
-    const [method, setMethod] = useState<'NAME' | 'ID'>('NAME');
+    const [method, setMethod] = useState<'NAME' | 'ID'>('ID');
     const [selectedColumn, setSelectedColumn] = useState('');
     
     // New State for Name configuration
@@ -1063,6 +1551,36 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
              </p>
 
              <div className="space-y-4 mb-8">
+                 <div 
+                    className={`border rounded-lg p-4 cursor-pointer transition-all ${method === 'ID' ? 'ring-2 ring-blue-500 bg-blue-50 border-blue-500' : 'border-gray-200 hover:border-gray-300'}`}
+                    onClick={() => setMethod('ID')}
+                 >
+                     <div className="flex items-start gap-3">
+                         <div className={`w-5 h-5 mt-1 rounded-full border flex items-center justify-center ${method === 'ID' ? 'border-blue-600' : 'border-gray-400'}`}>
+                             {method === 'ID' && <div className="w-2.5 h-2.5 bg-blue-600 rounded-full" />}
+                         </div>
+                         <div className="flex-1">
+                             <div className="font-bold flex items-center gap-2">
+                                 <BadgeIdIcon className="w-5 h-5 text-gray-500"/>
+                                 Match by Salary Identifier (Payroll ID)
+                             </div>
+                             <p className="text-sm text-gray-500 mt-1">Uses a specific column in your file to match against the Planday Payroll ID.</p>
+                             
+                             {method === 'ID' && (
+                                 <div className="mt-4 bg-white p-3 rounded border border-gray-200 animate-fadeIn" onClick={e => e.stopPropagation()}>
+                                     <label className="block text-xs font-bold text-gray-700 mb-1">Select Column containing ID:</label>
+                                     <SearchableSelect 
+                                        options={options} 
+                                        value={selectedColumn} 
+                                        onChange={setSelectedColumn} 
+                                        placeholder="-- Select ID Column --" 
+                                     />
+                                 </div>
+                             )}
+                         </div>
+                     </div>
+                 </div>
+
                  <div 
                     className={`border rounded-lg p-4 cursor-pointer transition-all ${method === 'NAME' ? 'ring-2 ring-blue-500 bg-blue-50 border-blue-500' : 'border-gray-200 hover:border-gray-300'}`}
                     onClick={() => setMethod('NAME')}
@@ -1114,36 +1632,6 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
                                     )}
                                 </div>
                             )}
-                         </div>
-                     </div>
-                 </div>
-
-                 <div 
-                    className={`border rounded-lg p-4 cursor-pointer transition-all ${method === 'ID' ? 'ring-2 ring-blue-500 bg-blue-50 border-blue-500' : 'border-gray-200 hover:border-gray-300'}`}
-                    onClick={() => setMethod('ID')}
-                 >
-                     <div className="flex items-start gap-3">
-                         <div className={`w-5 h-5 mt-1 rounded-full border flex items-center justify-center ${method === 'ID' ? 'border-blue-600' : 'border-gray-400'}`}>
-                             {method === 'ID' && <div className="w-2.5 h-2.5 bg-blue-600 rounded-full" />}
-                         </div>
-                         <div className="flex-1">
-                             <div className="font-bold flex items-center gap-2">
-                                 <BadgeIdIcon className="w-5 h-5 text-gray-500"/>
-                                 Match by Salary Identifier (Payroll ID)
-                             </div>
-                             <p className="text-sm text-gray-500 mt-1">Uses a specific column in your file to match against the Planday Payroll ID.</p>
-                             
-                             {method === 'ID' && (
-                                 <div className="mt-4 bg-white p-3 rounded border border-gray-200 animate-fadeIn" onClick={e => e.stopPropagation()}>
-                                     <label className="block text-xs font-bold text-gray-700 mb-1">Select Column containing ID:</label>
-                                     <SearchableSelect 
-                                        options={options} 
-                                        value={selectedColumn} 
-                                        onChange={setSelectedColumn}
-                                        placeholder="-- Select Column --"
-                                     />
-                                 </div>
-                             )}
                          </div>
                      </div>
                  </div>
@@ -1372,9 +1860,11 @@ const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initia
                             <BadgeIdIcon className="h-5 w-5 text-blue-500" />
                         </div>
                         <div className="ml-3">
-                            <h3 className="text-sm font-medium text-blue-800">Matching by Salary Identifier (Payroll ID)</h3>
+                            <h3 className="text-sm font-medium text-blue-800">
+                                {rows.length > 0 && Object.keys(rows[0]).includes("Planday Employee ID") ? "Matching by Planday Employee ID" : "Matching by Salary Identifier (Payroll ID)"}
+                            </h3>
                             <div className="mt-2 text-sm text-blue-700">
-                                <p>We have matched employees based on the selected column. Please review unmapped rows below.</p>
+                                <p>We have matched employees based on the selected column. Please review any unmapped rows below.</p>
                             </div>
                         </div>
                     </div>
@@ -1382,9 +1872,15 @@ const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initia
             )}
 
             <h2 className="text-2xl font-bold mb-4">Map Employees</h2>
-            <p className="text-gray-500 mb-6">
-                Your file is missing the "Planday Employee ID" column. Please map the rows in your file to Planday employees. 
-            </p>
+            {rows.length > 0 && Object.keys(rows[0]).includes("Planday Employee ID") ? (
+                <p className="text-gray-500 mb-6">
+                    Employees have been automatically matched using their Planday Employee ID. Please review the mapping below.
+                </p>
+            ) : (
+                <p className="text-gray-500 mb-6">
+                    Your file is missing the "Planday Employee ID" column. Please map the rows in your file to Planday employees. 
+                </p>
+            )}
 
             <div className="flex flex-col gap-4 mb-4">
                 <div className="flex gap-4 text-sm font-medium">
@@ -1497,6 +1993,8 @@ interface FieldMapperProps {
     onCancel: () => void;
     initialMapping?: Map<string, string>;
     onShowHelp?: () => void;
+    duplicateHeadersWarning?: string[];
+    usedIdentityColumns?: string[];
 }
 
 const EmployeeMapperRow: React.FC<{
@@ -1573,7 +2071,7 @@ const FieldMapperRow: React.FC<{
             ) : 0
         }));
         
-        return optionsWithScore.sort((a, b) => {
+        let sorted = optionsWithScore.sort((a, b) => {
             if (a.value === "") return -1;
             if (b.value === "") return 1;
 
@@ -1582,32 +2080,35 @@ const FieldMapperRow: React.FC<{
             }
             return a.label.localeCompare(b.label);
         }).map(opt => ({ value: opt.value, label: opt.label }));
-    }, [header, targetOptions]);
+
+        if (isIdentity) {
+            sorted = [
+                { value: "IDENTITY_IGNORE", label: "Already Mapped (Identity)" },
+                ...sorted
+            ];
+        }
+
+        return sorted;
+    }, [header, targetOptions, isIdentity]);
 
     return (
-        <tr className={`hover:bg-gray-50 ${isUnmapped ? 'bg-[#ffe5e5]' : ''}`}>
+        <tr className={`hover:bg-gray-50 ${(isUnmapped && !isIdentity) ? 'bg-[#ffe5e5]' : ''}`}>
             <td className="p-3 font-medium text-gray-800 align-middle">{header}</td>
             <td className="p-3 align-middle">
-                {isIdentity ? (
-                    <div className="w-full p-2 border border-transparent bg-gray-100 text-gray-500 rounded italic select-none">
-                        Already Mapped (Identity)
-                    </div>
-                ) : (
-                    <SearchableSelect 
-                        options={sortedOptions}
-                        value={currentTarget}
-                        onChange={(val) => onSelect(header, val)}
-                        placeholder="-- Ignore --"
-                        usedValues={usedTargets}
-                        matchStatus={matchStatus}
-                    />
-                )}
+                <SearchableSelect 
+                    options={sortedOptions}
+                    value={currentTarget}
+                    onChange={(val) => onSelect(header, val)}
+                    placeholder={isIdentity ? "Already Mapped (Identity)" : "-- Ignore --"}
+                    usedValues={usedTargets}
+                    matchStatus={matchStatus}
+                />
             </td>
         </tr>
     );
 };
 
-const FieldMapper: React.FC<FieldMapperProps> = ({ fileHeaders, availableTargets, onComplete, onCancel, initialMapping, onShowHelp }) => {
+const FieldMapper: React.FC<FieldMapperProps> = ({ fileHeaders, availableTargets, onComplete, onCancel, initialMapping, onShowHelp, duplicateHeadersWarning, usedIdentityColumns }) => {
     const [mapping, setMapping] = useState<Map<string, string>>(new Map());
     const [identityHeaders, setIdentityHeaders] = useState<Set<string>>(new Set());
     const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -1623,7 +2124,7 @@ const FieldMapper: React.FC<FieldMapperProps> = ({ fileHeaders, availableTargets
         const newMatchTypes = new Map<string, 'exact' | 'auto' | 'manual'>();
         const identity = new Set<string>();
 
-        // Identify ID columns first (Names)
+        // Identify ID columns first (Names) if not provided. Always fallback catch 'Planday Employee ID'
         const nameRegex = /^(first(\s*)name|last(\s*)name|full(\s*)name|firstname|lastname|fullname|fornavn|efternavn|fulde(\s*)navn|förnamn|efternamn|etternavn|vorname|nachname)$/i;
         const employeeRegex = /^(employee|planday employee id)$/i;
         const payrollRegex = /^(salary\s*identifier|payroll\s*(id|identifier)|identifier|id)$/i;
@@ -1632,9 +2133,18 @@ const FieldMapper: React.FC<FieldMapperProps> = ({ fileHeaders, availableTargets
             const lower = header.toLowerCase().trim();
             
             // Check for identity fields
-            if (nameRegex.test(lower) || employeeRegex.test(lower) || payrollRegex.test(lower)) {
-                identity.add(header);
-                return; // Skip mapping for identity fields
+            if (usedIdentityColumns && usedIdentityColumns.length > 0) {
+                if (usedIdentityColumns.includes(header) || lower === 'planday employee id') {
+                     identity.add(header);
+                     newMap.set(header, 'IDENTITY_IGNORE');
+                     return;
+                }
+            } else {
+                if (nameRegex.test(lower) || employeeRegex.test(lower) || payrollRegex.test(lower)) {
+                    identity.add(header);
+                    newMap.set(header, 'IDENTITY_IGNORE');
+                    return;
+                }
             }
 
             if (initialMapping && initialMapping.has(header)) {
@@ -1902,6 +2412,31 @@ const FieldMapper: React.FC<FieldMapperProps> = ({ fileHeaders, availableTargets
     return (
          <div className="bg-white p-8 rounded-xl shadow-lg border border-gray-100 max-w-4xl mx-auto relative">
             <h2 className="text-2xl font-bold mb-4">Map Fields</h2>
+            
+            {duplicateHeadersWarning && duplicateHeadersWarning.length > 0 && (
+                <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 mb-6 rounded-r-lg">
+                    <div className="flex">
+                        <div className="flex-shrink-0">
+                            <AlertIcon className="h-5 w-5 text-yellow-600" />
+                        </div>
+                        <div className="ml-3">
+                            <h3 className="text-sm font-medium text-yellow-800">Duplicate Columns Found</h3>
+                            <div className="mt-2 text-sm text-yellow-700">
+                                <p>
+                                    Your file contains identically named columns. We have renamed the subsequent instances to ensure uniqueness.
+                                    Please review the mapping for the following columns:
+                                </p>
+                                <ul className="list-disc ml-5 mt-1">
+                                    {duplicateHeadersWarning.map((col, idx) => (
+                                        <li key={idx} className="font-mono text-xs mt-1">{col}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <div className="flex flex-col gap-4 mb-6">
                 <div className="flex flex-col gap-2">
                     <p className="text-gray-500">
@@ -2231,7 +2766,7 @@ const PayloadDebugView: React.FC<{ reviews: EmployeeUpdateReview[] }> = ({ revie
     );
 };
 
-type AppStep = 'auth' | 'configure' | 'select_fields' | 'generate_template' | 'upload' | 'identity_method' | 'map_employees' | 'map_fields' | 'validation_errors' | 'resolve_dates' | 'review' | 'processing' | 'summary';
+type AppStep = 'auth' | 'configure' | 'select_fields' | 'configure_wages' | 'generate_template' | 'upload' | 'identity_method' | 'map_employees' | 'map_fields' | 'wage_type_selection' | 'validation_errors' | 'resolve_dates' | 'review' | 'processing' | 'summary';
 
 const STEP_CONFIG = {
     labels: [
@@ -2249,6 +2784,7 @@ const getStepIndex = (step: AppStep) => {
         case 'auth': return 0;
         case 'configure': 
         case 'select_fields': 
+        case 'configure_wages':
         case 'generate_template': return 1;
         case 'upload': 
         case 'identity_method':
@@ -2274,7 +2810,11 @@ interface DateLogItem {
 const getNonEmptyHeaders = (json: any[]) => {
     if (!json || json.length === 0) return [];
     const headers = Object.keys(json[0]);
+    const lowerHeaders = new Set(headers.map(h => h.toLowerCase()));
     return headers.filter(h => {
+        // If there's an 'UPDATE - ' version of this header, we exclude the "original" informational column
+        if (lowerHeaders.has(`update - ${h.toLowerCase()}`)) return false;
+
         return json.some(row => {
             const val = row[h];
             return val !== undefined && val !== null && String(val).trim() !== '';
@@ -2660,7 +3200,7 @@ const getFieldConfig = (colName: string, defs: DefinitionCollection | null): { t
     if (lowerName.includes("fixed salary") && lowerName.includes("valid from")) return { type: "Date", description: "Salary Valid From", guidance: "Date must be in YYYY-MM-DD format, when editing in the table. If left blank, and rate is inputted, then the rate will be assigned from today’s date." };
 
     // Groups / Wages
-    if (lowerName.startsWith("group rate - ") && !lowerName.includes("wage type") && !lowerName.includes("valid from") && !lowerName.includes("salary code")) return { type: "Numeric", description: "Group Rate Amount", guidance: "X or 0 = assign without rate, or enter hourly rate (e.g., 15.50 or 15,50). Both . and , accepted. Leave empty to skip. Remember that Wage Type is required to be filled out when updating rates." };
+    if (lowerName.startsWith("group rate - ") && !lowerName.includes("wage type") && !lowerName.includes("valid from") && !lowerName.includes("salary code")) return { type: "Numeric", description: "Group Rate Amount", guidance: "X or 0 = assign without rate, or enter hourly rate (e.g., 15.50 or 15,50). Both . and , accepted. Leave empty to skip." };
     if (lowerName.startsWith("group wage type - ")) return { type: "Dropdown", description: "Group Wage Type", guidance: "HourlyRate or ShiftRate. Input HourlyRate to assign the employee group with an hourly rate; input ShiftRate if the employee is paid a fixed amount per shift.", options: ["HourlyRate", "ShiftRate"] };
     if (lowerName.startsWith("group valid from - ")) return { type: "Date", description: "Group Valid From", guidance: "Date must be in YYYY-MM-DD format, when editing in the table. If left blank, and rate is inputted, then the rate will be assigned from today’s date." };
     if (lowerName.startsWith("group salary code - ")) return { type: "Text", description: "Group Salary Code", guidance: "Only input a personal salary code, if the code should differ from the general or employee group salary code. If in doubt, leave it blank." };
@@ -2998,6 +3538,11 @@ const App: React.FC = () => {
     const [selectedWages, setSelectedWages] = useState<Set<number>>(new Set());
     const [selectedSkills, setSelectedSkills] = useState<Set<number>>(new Set());
     
+    // Wage format options (Template generation)
+    const [includeWageType, setIncludeWageType] = useState<boolean>(true);
+    const [includeValidFrom, setIncludeValidFrom] = useState<boolean>(true);
+    const [includeSalaryCode, setIncludeSalaryCode] = useState<boolean>(true);
+    
     const [populateData, setPopulateData] = useState(false);
 
     const [rawFileJson, setRawFileJson] = useState<any[] | null>(null);
@@ -3009,6 +3554,7 @@ const App: React.FC = () => {
     
     const [dateReport, setDateReport] = useState<DateLogItem[]>([]);
     const [detectedUSFormat, setDetectedUSFormat] = useState(false);
+    const [duplicateHeadersWarning, setDuplicateHeadersWarning] = useState<string[]>([]);
 
     // Review step filters
     const [searchReview, setSearchReview] = useState('');
@@ -3148,7 +3694,9 @@ const App: React.FC = () => {
     const [employeeMapping, setEmployeeMapping] = useState<Map<number, number>>(new Map());
     const [initialAutoMapping, setInitialAutoMapping] = useState<Map<number, number | null>>(new Map());
     const [selectedIdentityMethod, setSelectedIdentityMethod] = useState<'NAME' | 'ID'>('NAME');
+    const [selectedIdentityColumns, setSelectedIdentityColumns] = useState<string[]>([]);
     const [fieldMapping, setFieldMapping] = useState<Map<string, string>>(new Map());
+    const [missingWageTypeGroups, setMissingWageTypeGroups] = useState<string[]>([]);
 
     const [showConfirmModal, setShowConfirmModal] = useState(false);
     const [isMissingFieldsExpanded, setIsMissingFieldsExpanded] = useState(false);
@@ -3528,7 +4076,7 @@ const App: React.FC = () => {
             // --- NEW INSTRUCTION SHEET STRUCTURE (5 Columns) ---
             const instructionHeaders = ["Field Name", "Description", "Required", "Field Type", "Guidance"];
             const instructionRows: string[][] = [
-                ["IMPORTANT NOTES", "* Only input your edits in the coloured columns (headers starting with UPDATE - )\n* Leave cells blank to keep existing values, or type 'REMOVE' to clear a value.\n* DO NOT modify or input edits in the identification columns.", "", "", ""],
+                ["IMPORTANT NOTES", "ⓘ ONLY edit colored columns (headers starting with \"UPDATE - ..\")\n\nⓘ DO NOT edit the identification (white) columns\n\n☛ UPDATE a value: Follow the Field Type/Guidance\n\n☛ KEEP: Leave the cell blank\n\n☛ DELETE: Type REMOVE", "", "", ""],
                 ["", "", "", "", ""], 
                 instructionHeaders,
                 ["Planday Employee ID", "System ID", "REQUIRED", "Integer", "Do not edit. Used for identification."],
@@ -3673,23 +4221,32 @@ const App: React.FC = () => {
                     
                     if (populateData) {
                         headers.push(`Group Rate - ${g.name}`);
+                        if (includeWageType) headers.push(`Group Wage Type - ${g.name}`);
+                        if (includeValidFrom) headers.push(`Group Valid From - ${g.name}`);
+                        if (includeSalaryCode) headers.push(`Group Salary Code - ${g.name}`);
                     }
 
                     const rateHeader = `UPDATE - Group Rate - ${g.name}`;
                     headers.push(rateHeader);
-                    instructionRows.push([rateHeader, "Group Rate Amount", "", "Numeric", "X or 0 = assign without rate, or enter hourly rate (e.g., 15.50 or 15,50). Both . and , accepted. Leave empty to skip. Remember that Wage Type is required to be filled out when updating rates."]);
+                    instructionRows.push([rateHeader, "Group Rate Amount", "", "Numeric", "X or 0 = assign without rate, or enter hourly rate (e.g., 15.50 or 15,50). Both . and , accepted. Leave empty to skip."]);
                     
-                    const wageHeader = `UPDATE - Group Wage Type - ${g.name}`;
-                    headers.push(wageHeader);
-                    instructionRows.push([wageHeader, "Group Wage Type", "", "Dropdown", "HourlyRate or ShiftRate. Input HourlyRate to assign the employee group with an hourly rate; input ShiftRate if the employee is paid a fixed amount per shift."]);
+                    if (includeWageType) {
+                        const wageHeader = `UPDATE - Group Wage Type - ${g.name}`;
+                        headers.push(wageHeader);
+                        instructionRows.push([wageHeader, "Group Wage Type", "", "Dropdown", "HourlyRate or ShiftRate. Input HourlyRate to assign the employee group with an hourly rate; input ShiftRate if the employee is paid a fixed amount per shift."]);
+                    }
                     
-                    const validFromHeader = `UPDATE - Group Valid From - ${g.name}`;
-                    headers.push(validFromHeader);
-                    instructionRows.push([validFromHeader, "Group Rate Valid From", "", "Date", "Various date formats supported, e.g. DD/MM/YYYY. If left blank, and rate is inputted, then the rate will be assigned from today’s date."]);
+                    if (includeValidFrom) {
+                        const validFromHeader = `UPDATE - Group Valid From - ${g.name}`;
+                        headers.push(validFromHeader);
+                        instructionRows.push([validFromHeader, "Group Rate Valid From", "", "Date", "Various date formats supported, e.g. DD/MM/YYYY. If left blank, and rate is inputted, then the rate will be assigned from today’s date."]);
+                    }
 
-                    const salaryCodeHeader = `UPDATE - Group Salary Code - ${g.name}`;
-                    headers.push(salaryCodeHeader);
-                    instructionRows.push([salaryCodeHeader, "Group Salary Code", "", "Text", "Only input a personal salary code, if the code should differ from the general or employee group salary code. If in doubt, leave it blank."]);
+                    if (includeSalaryCode) {
+                        const salaryCodeHeader = `UPDATE - Group Salary Code - ${g.name}`;
+                        headers.push(salaryCodeHeader);
+                        instructionRows.push([salaryCodeHeader, "Group Salary Code", "", "Text", "Only input a personal salary code, if the code should differ from the general or employee group salary code. If in doubt, leave it blank."]);
+                    }
                 });
             }
 
@@ -3706,22 +4263,22 @@ const App: React.FC = () => {
 
                 if (populateData) {
                     if (selectedSections.system) {
-                        row["Email"] = data.email || "";
-                        if (isSystemFieldAvailable('birthDate')) row["Birth Date"] = formatDateToYYYYMMDD(data.birthDate);
-                        if (isSystemFieldAvailable('gender')) row["Gender"] = data.gender || "";
-                        if (isSystemFieldAvailable('ssn')) row["Tax ID"] = data.ssn || "";
-                        if (isSystemFieldAvailable('street1')) row["Street 1"] = data.street1 || "";
-                        if (isSystemFieldAvailable('street2')) row["Street 2"] = data.street2 || "";
-                        if (isSystemFieldAvailable('zip')) row["Zip"] = data.zip || "";
-                        if (isSystemFieldAvailable('city')) row["City"] = data.city || "";
-                        if (isSystemFieldAvailable('cellPhoneCountryCode') || isSystemFieldAvailable('phoneCountryCode')) row["Country Code"] = data.cellPhoneCountryCode || data.phoneCountryCode || "";
-                        if (isSystemFieldAvailable('cellPhone')) row["Mobile"] = data.cellPhone || data.phone || "";
-                        if (isSystemFieldAvailable('hiredFrom')) row["Start/hired Date"] = formatDateToYYYYMMDD(data.hiredFrom || data.hiredDate);
-                        if (isSystemFieldAvailable('jobTitle')) row["jobTitle"] = data.jobTitle || "";
-                        if (isSystemFieldAvailable('employeeTypeId')) row["Employee Type"] = defs.employeeTypes.find(t => t.id === data.employeeTypeId)?.name || data.employeeTypeId || "";
+                        if (selectedSystemFields.has('email')) row["Email"] = data.email || "";
+                        if (isSystemFieldAvailable('birthDate') && selectedSystemFields.has('birthDate')) row["Birth Date"] = formatDateToYYYYMMDD(data.birthDate);
+                        if (isSystemFieldAvailable('gender') && selectedSystemFields.has('gender')) row["Gender"] = data.gender || "";
+                        if (isSystemFieldAvailable('ssn') && selectedSystemFields.has('ssn')) row["Tax ID"] = data.ssn || "";
+                        if (isSystemFieldAvailable('street1') && selectedSystemFields.has('street1')) row["Street 1"] = data.street1 || "";
+                        if (isSystemFieldAvailable('street2') && selectedSystemFields.has('street2')) row["Street 2"] = data.street2 || "";
+                        if (isSystemFieldAvailable('zip') && selectedSystemFields.has('zip')) row["Zip"] = data.zip || "";
+                        if (isSystemFieldAvailable('city') && selectedSystemFields.has('city')) row["City"] = data.city || "";
+                        if ((isSystemFieldAvailable('cellPhoneCountryCode') || isSystemFieldAvailable('phoneCountryCode')) && selectedSystemFields.has('cellPhoneCountryCode')) row["Country Code"] = data.cellPhoneCountryCode || data.phoneCountryCode || "";
+                        if (isSystemFieldAvailable('cellPhone') && selectedSystemFields.has('cellPhone')) row["Mobile"] = data.cellPhone || data.phone || "";
+                        if (isSystemFieldAvailable('hiredFrom') && selectedSystemFields.has('hiredFrom')) row["Start/hired Date"] = formatDateToYYYYMMDD(data.hiredFrom || data.hiredDate);
+                        if (isSystemFieldAvailable('jobTitle') && selectedSystemFields.has('jobTitle')) row["jobTitle"] = data.jobTitle || "";
+                        if (isSystemFieldAvailable('employeeTypeId') && selectedSystemFields.has('employeeTypeId')) row["Employee Type"] = defs.employeeTypes.find(t => t.id === data.employeeTypeId)?.name || data.employeeTypeId || "";
                         
-                        row["System Bank Reg"] = data.bankAccount?.registrationNumber || "";
-                        row["System Bank Account Nr"] = data.bankAccount?.accountNumber || "";
+                        if (selectedSystemFields.has('bankReg')) row["System Bank Reg"] = data.bankAccount?.registrationNumber || "";
+                        if (selectedSystemFields.has('bankAcc')) row["System Bank Account Nr"] = data.bankAccount?.accountNumber || "";
                     }
 
                     if (selectedSections.departments) {
@@ -3735,6 +4292,7 @@ const App: React.FC = () => {
 
                     if (selectedSections.custom) {
                         defs.customFields.forEach(f => {
+                            if (!selectedCustomFields.has(String(f.id))) return;
                             let val = data[f.originalName];
                             if (val && typeof val === 'object' && 'value' in val) val = val.value;
                             
@@ -3791,9 +4349,13 @@ const App: React.FC = () => {
                             data.payRates.forEach((r: any) => {
                                 const group = defs.employeeGroups.find(g => g.id === r.employeeGroupId);
                                 if (group && selectedWages.has(group.id)) {
-                                    let val = r.rate !== undefined && r.rate !== null ? String(r.rate) : '';
-                                    if (r.wageType === 'ShiftRate') val += " - Shift Rate";
-                                    row[`Group Rate - ${group.name}`] = val;
+                                    let rateVal = r.rate !== undefined && r.rate !== null ? String(r.rate) : '';
+                                    if (!includeWageType && r.wageType === 'ShiftRate') rateVal += " - Shift Rate";
+                                    row[`Group Rate - ${group.name}`] = rateVal;
+                                    
+                                    if (includeWageType) row[`Group Wage Type - ${group.name}`] = r.wageType || '';
+                                    if (includeValidFrom) row[`Group Valid From - ${group.name}`] = r.validFrom ? formatDateToYYYYMMDD(r.validFrom) : '';
+                                    if (includeSalaryCode) row[`Group Salary Code - ${group.name}`] = r.salaryCode || '';
                                 }
                             });
                         }
@@ -3808,7 +4370,7 @@ const App: React.FC = () => {
             // Add Note/Comment to A1
             if (ws['A1']) {
                 ws['A1'].c = [{
-                    t: "Note: These are NOT Salary/Payroll IDs. Please read the instructions found in the second sheet before filling out the template. Right-click cell A1 to hide/delete this note.",
+                    t: "Note: Please read the instructions found in the second sheet before filling out the template. Right-click cell A1 to hide/delete this note.",
                     a: "Planday Updater",
                     hidden: true
                 }];
@@ -4038,7 +4600,59 @@ const App: React.FC = () => {
                 const data = new Uint8Array(evt.target?.result as ArrayBuffer);
                 const wb = XLSX.read(data, { type: 'array', cellDates: true });
                 const ws = wb.Sheets[wb.SheetNames[0]]; 
-                const json: any[] = XLSX.utils.sheet_to_json(ws, { raw: true });
+
+                const rawArray: any[][] = XLSX.utils.sheet_to_json(ws, { raw: true, header: 1 });
+                if (rawArray.length < 2) {
+                    throw new Error("File is empty or has no data");
+                }
+
+                const rawHeaders = rawArray[0] as string[];
+                const dedupedHeaders: string[] = [];
+                const headerCounts = new Map<string, number>();
+                const duplicatesRenamed: string[] = [];
+
+                for (let i = 0; i < rawHeaders.length; i++) {
+                    let orig = rawHeaders[i];
+                    if (orig === undefined || orig === null || String(orig).trim() === '') {
+                        orig = `Column${i}`;
+                    } else {
+                        orig = String(orig);
+                    }
+                    const lower = orig.toLowerCase();
+                    
+                    if (headerCounts.has(lower)) {
+                        const count = headerCounts.get(lower)!;
+                        const newHeader = `${orig}_${count}`;
+                        headerCounts.set(lower, count + 1);
+                        dedupedHeaders.push(newHeader);
+                        duplicatesRenamed.push(newHeader);
+                    } else {
+                        headerCounts.set(lower, 1);
+                        dedupedHeaders.push(orig);
+                    }
+                }
+
+                setDuplicateHeadersWarning(duplicatesRenamed);
+
+                const json: any[] = [];
+                for (let r = 1; r < rawArray.length; r++) {
+                    const rowArray = rawArray[r];
+                    if (!rowArray || rowArray.length === 0) continue;
+                    
+                    const rowObj: any = {};
+                    let hasData = false;
+                    for (let c = 0; c < dedupedHeaders.length; c++) {
+                        if (rowArray[c] !== undefined && rowArray[c] !== null && String(rowArray[c]).trim() !== "") {
+                            let cellValue = rowArray[c];
+                            if (typeof cellValue === 'string') {
+                                cellValue = cellValue.trim();
+                            }
+                            rowObj[dedupedHeaders[c]] = cellValue;
+                            hasData = true;
+                        }
+                    }
+                    if (hasData) json.push(rowObj);
+                }
                 
                 if (json.length === 0) {
                     throw new Error("File is empty");
@@ -4050,8 +4664,33 @@ const App: React.FC = () => {
                 const headers = Object.keys(json[0]);
                 const hasIdColumn = headers.includes("Planday Employee ID");
 
-                // --- NEW PATH: Custom file without ID ---
-                if (!hasIdColumn) {
+                const targetFields = generateTargetFields(definitions);
+                const targetKeys = new Set(targetFields.map(f => f.key));
+                const targetLabels = new Map(targetFields.map(f => [f.label, f.key])); // mapping from informational label to its update key
+                
+                const alwaysRecognized = new Set([
+                    "Planday Employee ID", "First Name", "Last Name", "Salary Identifier (Payroll ID)", "System ID"
+                ]);
+
+                const hasUnknownColumns = headers.some(h => {
+                    const trimmed = h.trim();
+                    if (!trimmed) return false; // Ignore empty headers
+                    if (alwaysRecognized.has(trimmed)) return false;
+                    if (targetKeys.has(trimmed)) return false;
+                    
+                    // If it's a known informational column, it is only valid if the corresponding UPDATE column is also present.
+                    // Otherwise, it implies the user intends to map this column data to an update field.
+                    if (targetLabels.has(trimmed)) {
+                        const updateKey = targetLabels.get(trimmed)!;
+                        if (headers.includes(updateKey)) return false; 
+                    }
+                    
+                    // Any other column is unknown and requires mapping
+                    return true;
+                });
+
+                // --- NEW PATH: Custom file without ID or with unknown columns ---
+                if (!hasIdColumn || hasUnknownColumns) {
                     setUnmappedJson(json);
                     
                     // Need employees list for mapping
@@ -4062,8 +4701,22 @@ const App: React.FC = () => {
                     }
                     
                     setIsLoading(false);
-                    // Route to Identity Selection Method
-                    setCurrentStep('identity_method'); 
+                    
+                    if (hasIdColumn) {
+                       // We have the ID, so skip identity method and employee mapping, go straight to field mapping
+                       const empMapping = new Map<number, number>();
+                       json.forEach((row, idx) => {
+                           const pid = row["Planday Employee ID"];
+                           if (pid) empMapping.set(idx, parseInt(pid, 10));
+                       });
+                       setEmployeeMapping(empMapping);
+                       setSelectedIdentityMethod('ID');
+                       setSelectedIdentityColumns(['Planday Employee ID']);
+                       setCurrentStep('map_fields');
+                    } else {
+                       // Route to Identity Selection Method
+                       setCurrentStep('identity_method'); 
+                    }
                     return;
                 }
 
@@ -4148,6 +4801,8 @@ const App: React.FC = () => {
         setSelectedIdentityMethod(method);
         const autoMap = new Map<number, number | null>();
         
+        let usedCols: string[] = [];
+        
         // Build employee lookup map (name -> id)
         const empMap = new Map<string, number>();
         allEmployees.forEach(e => {
@@ -4167,6 +4822,9 @@ const App: React.FC = () => {
 
                     const findAliasedKey = (aliases: string[]) => {
                          const match = kLower.find(k => aliases.includes(k.lower));
+                         if (match && !usedCols.includes(match.key)) {
+                             usedCols.push(match.key);
+                         }
                          return match ? row[match.key] : null;
                     };
 
@@ -4184,16 +4842,22 @@ const App: React.FC = () => {
                          } else if (lastName) {
                              nameToMatch = lastName;
                          } else {
-                             const nameKey = Object.keys(row).find(k => k.toLowerCase().includes('name'));
-                             if (nameKey) nameToMatch = row[nameKey];
+                             const nameKeyMatch = kLower.find(k => k.lower.includes('name'));
+                             if (nameKeyMatch) {
+                                 nameToMatch = row[nameKeyMatch.key];
+                                 if (!usedCols.includes(nameKeyMatch.key)) usedCols.push(nameKeyMatch.key);
+                             }
                          }
                     }
                 } else if (mode === 'SINGLE') {
                     nameToMatch = row[config.col1] || "";
+                    if (config.col1 && !usedCols.includes(config.col1)) usedCols.push(config.col1);
                 } else if (mode === 'SPLIT') {
                     const first = row[config.col1] || "";
                     const last = row[config.col2] || "";
                     if (first || last) nameToMatch = `${first} ${last}`.trim();
+                    if (config.col1 && !usedCols.includes(config.col1)) usedCols.push(config.col1);
+                    if (config.col2 && !usedCols.includes(config.col2)) usedCols.push(config.col2);
                 }
 
                 if (nameToMatch) {
@@ -4207,6 +4871,7 @@ const App: React.FC = () => {
         } else if (method === 'ID' && config) {
             // ID Matching Logic
             // config is column name string in this case
+            if (config && !usedCols.includes(config)) usedCols.push(config);
             const idMap = new Map<string, number>();
             allEmployees.forEach(e => {
                 if (e.salaryIdentifier) {
@@ -4225,6 +4890,7 @@ const App: React.FC = () => {
             });
         }
 
+        setSelectedIdentityColumns(usedCols);
         setInitialAutoMapping(autoMap);
         setCurrentStep('map_employees');
     };
@@ -4249,8 +4915,77 @@ const App: React.FC = () => {
         }, 100);
     };
 
-    const handleSkipInvalidFields = () => {
+    const generateSkippedLogFile = (errors: ValidationError[]) => {
+        const wb = XLSX.utils.book_new();
+
+        const logData = [
+            ["Row #", "Employee Name", "Field", "Field Type", "Incorrect Input Value", "Guidance / Expected"]
+        ];
+
+        errors.forEach(err => {
+            const config = getFieldConfig(err.fullKey ? err.fullKey.replace("UPDATE - ", "").trim() : err.field, definitions);
+            const fieldType = config ? config.type : 'Unknown';
+
+            logData.push([
+                err.row.toString(),
+                err.employeeName,
+                err.field,
+                fieldType,
+                err.value || "",
+                err.allowed.join(' OR ')
+            ]);
+        });
+
+        const ws = XLSX.utils.aoa_to_sheet(logData);
+        
+        const headerStyle = {
+            font: { bold: true, color: { rgb: "FFFFFF" } },
+            fill: { fgColor: { rgb: "1E3A8A" } },
+            alignment: { vertical: "center", horizontal: "center", wrapText: true },
+            border: {
+                top: { style: "thin", color: { rgb: "CCCCCC" } },
+                bottom: { style: "thin", color: { rgb: "CCCCCC" } },
+                left: { style: "thin", color: { rgb: "CCCCCC" } },
+                right: { style: "thin", color: { rgb: "CCCCCC" } }
+            }
+        };
+
+        const itemStyle = {
+            font: { color: { rgb: "333333" } },
+            alignment: { vertical: "center", wrapText: true }
+        };
+
+        const errorStyle = {
+            font: { color: { rgb: "333333" } },
+            fill: { fgColor: { rgb: "FABEBE" } },
+            alignment: { vertical: "center", wrapText: true }
+        };
+
+        for (let C = 0; C < logData[0].length; C++) {
+            const headCellRef = XLSX.utils.encode_cell({ c: C, r: 0 });
+            if (ws[headCellRef]) ws[headCellRef].s = headerStyle;
+        }
+
+        for (let r = 1; r < logData.length; r++) {
+            for (let c = 0; c < logData[0].length; c++) {
+                const cellRef = XLSX.utils.encode_cell({ r, c });
+                if (!ws[cellRef]) continue;
+                // Index 4 is the "Incorrect Input Value" column
+                ws[cellRef].s = c === 4 ? errorStyle : itemStyle;
+            }
+        }
+
+        ws['!cols'] = [{ wch: 10 }, { wch: 30 }, { wch: 30 }, { wch: 15 }, { wch: 30 }, { wch: 60 }];
+        XLSX.utils.book_append_sheet(wb, ws, "Skipped Updates Log");
+
+        XLSX.writeFile(wb, "Planday_Skipped_Emp_Updates.xlsx");
+    };
+
+    const handleSkipInvalidFields = (generateLog: boolean) => {
         if (!rawFileJson) return;
+        if (generateLog && validationErrors.length > 0) {
+            generateSkippedLogFile(validationErrors);
+        }
         const newJson = [...rawFileJson].map(row => ({...row}));
         validationErrors.forEach(err => {
             if (err.fullKey === 'FIXED_SALARY_MISSING') {
@@ -4275,18 +5010,58 @@ const App: React.FC = () => {
         continueAfterValidation(rawFileJson);
     };
 
-    const handleUpdateErrorValue = (rawRowIndex: number, fullKey: string, newValue: string) => {
+    const handleBulkUpdateErrorValues = (updates: {rawRowIndex: number, fullKey: string, newValue: string}[]) => {
         if (!rawFileJson) return;
-        const newJson = [...rawFileJson];
-        newJson[rawRowIndex] = { ...newJson[rawRowIndex], [fullKey]: newValue };
-        setRawFileJson(newJson);
-        
-        // Optimistically update validation errors value display
-        setValidationErrors(errors => errors.map(err => 
-            err.rawRowIndex === rawRowIndex && err.fullKey === fullKey 
-                ? { ...err, value: newValue } 
-                : err
-        ));
+        setRawFileJson(prev => {
+            if (!prev) return prev;
+            const newJson = [...prev];
+            updates.forEach(u => {
+                newJson[u.rawRowIndex] = { ...newJson[u.rawRowIndex], [u.fullKey]: u.newValue };
+            });
+            return newJson;
+        });
+
+        setValidationErrors(errors => errors.map(err => {
+            const updateMatch = updates.find(u => u.rawRowIndex === err.rawRowIndex && u.fullKey === err.fullKey);
+            return updateMatch ? { ...err, originalValue: err.originalValue ?? err.value, value: updateMatch.newValue } : err;
+        }));
+    };
+
+    const handleUpdateErrorValue = (rawRowIndex: number, fullKey: string, newValue: string) => {
+        handleBulkUpdateErrorValues([{ rawRowIndex, fullKey, newValue }]);
+    };
+
+    const handleWageTypeSelectionsComplete = (selections: Map<string, string>, overwrite: boolean) => {
+        if (!rawFileJson) return;
+        const newJson = rawFileJson.map(row => {
+            const newRow = { ...row };
+            missingWageTypeGroups.forEach(group => {
+                const rateKey = `UPDATE - Group Rate - ${group}`;
+                if (newRow[rateKey] && String(newRow[rateKey]).trim() && String(newRow[rateKey]).trim() !== 'REMOVE') {
+                    const existingType = String(newRow[`UPDATE - Group Wage Type - ${group}`] || '').trim();
+                    if (overwrite || !existingType) {
+                        const sel = selections.get(group);
+                        if (sel) {
+                            newRow[`UPDATE - Group Wage Type - ${group}`] = sel;
+                        }
+                    }
+                }
+            });
+            return newRow;
+        });
+
+        const customFieldMap = new Map<string, FieldDefinition>(definitions!.customFields.map(f => [f.description.toLowerCase(), f] as [string, FieldDefinition]));
+
+        const valErrors = validateData(newJson);
+        if (valErrors.length > 0) {
+            setRawFileJson(newJson);
+            setValidationErrors(valErrors);
+            setValidationSource('upload');
+            setCurrentStep('validation_errors');
+            return;
+        }
+
+        continueAfterValidation(newJson);
     };
 
     const handleFieldMappingComplete = (mapping: Map<string, string>) => {
@@ -4336,7 +5111,7 @@ const App: React.FC = () => {
                                     groupOrderForRates.push(matchingGroup.name.trim());
                                 }
                             });
-                        } else if (targetKey && targetKey !== 'ALL_EMPLOYEE_GROUPS_RATES' && targetKey !== 'ALL_WAGE_SALARY_VALID_FROM') {
+                        } else if (targetKey && targetKey !== 'IDENTITY_IGNORE' && targetKey !== 'ALL_EMPLOYEE_GROUPS_RATES' && targetKey !== 'ALL_WAGE_SALARY_VALID_FROM') {
                             newRow[targetKey] = row[header];
                         }
                     });
@@ -4370,21 +5145,6 @@ const App: React.FC = () => {
                         }
                     });
 
-                    // Ensure Group Wage Type is 'HourlyRate' by default if a Group Rate is set
-                    Object.keys(newRow).forEach(key => {
-                        if (key.startsWith('UPDATE - Group Rate - ')) {
-                            const val = String(newRow[key]).trim();
-                            if (val && val !== 'REMOVE') {
-                                const groupName = key.replace('UPDATE - Group Rate - ', '');
-                                const wageTypeKey = `UPDATE - Group Wage Type - ${groupName}`;
-                                const wageTypeVal = String(newRow[wageTypeKey] || '').trim();
-                                if (!wageTypeVal) {
-                                    newRow[wageTypeKey] = "HourlyRate";
-                                }
-                            }
-                        }
-                    });
-
                     mappedRows.push(newRow);
                 });
 
@@ -4403,7 +5163,7 @@ const App: React.FC = () => {
         const processStandardJson = (json: any[]) => {
         if (!definitions) return;
 
-        // Ensure Group Wage Type is 'HourlyRate' by default if a Group Rate is set
+        let missingWageTypesForGroups: Set<string> = new Set();
         json.forEach(row => {
             Object.keys(row).forEach(key => {
                 if (key.startsWith('UPDATE - Group Rate - ')) {
@@ -4413,12 +5173,20 @@ const App: React.FC = () => {
                         const wageTypeKey = `UPDATE - Group Wage Type - ${groupName}`;
                         const wageTypeVal = String(row[wageTypeKey] || '').trim();
                         if (!wageTypeVal) {
-                            row[wageTypeKey] = "HourlyRate";
+                            missingWageTypesForGroups.add(groupName);
                         }
                     }
                 }
             });
         });
+
+        if (missingWageTypesForGroups.size > 0) {
+            setMissingWageTypeGroups(Array.from(missingWageTypesForGroups));
+            setRawFileJson(json);
+            setCurrentStep('wage_type_selection');
+            setIsLoading(false);
+            return;
+        }
         
         const customFieldMap = new Map<string, FieldDefinition>(definitions.customFields.map(f => [f.description.toLowerCase(), f] as [string, FieldDefinition]));
 
@@ -4511,7 +5279,7 @@ const App: React.FC = () => {
             setAmbiguousDates(ambiguities);
             setCurrentStep('resolve_dates');
         } else {
-            processRows(json, [], isUSFormat, true); 
+            processRows(json, [], isUSFormat, true, true); 
         }
         
         setIsLoading(false);
@@ -4594,6 +5362,7 @@ const App: React.FC = () => {
             let hasFixedSalary = false;
             const fixedSalaryFields = { period: false, hours: false, amount: false };
             const groupPresence = new Map<string, { rate: boolean, wageType: boolean }>();
+            let primaryDeptKeys: {key: string, val: string, header: string}[] = [];
 
             Object.keys(row).forEach(key => {
                 if (!key.startsWith('UPDATE - ')) return;
@@ -4628,11 +5397,10 @@ const App: React.FC = () => {
                 }
 
                 const isRemove = lowerVal === 'remove' || lowerVal === 'delete';
-                if (isRemove) return; 
 
                 // 1. Gender
                 if (lowerHeader === 'gender') {
-                    if (!genderSet.has(lowerVal)) {
+                    if (lowerVal !== 'remove' && !genderSet.has(lowerVal)) {
                         errors.push({
                             rawRowIndex: rowIndex,
                             fullKey: key,
@@ -4640,7 +5408,7 @@ const App: React.FC = () => {
                             employeeName: empName,
                             field: 'Gender',
                             value: val,
-                            allowed: validGenders
+                            allowed: [...validGenders, 'REMOVE']
                         });
                     }
                 }
@@ -4662,7 +5430,7 @@ const App: React.FC = () => {
 
                 // 3. Contract Rule
                 else if (lowerHeader === 'contract rule') {
-                    if (!ruleMap.has(lowerVal)) {
+                    if (lowerVal !== 'remove' && !ruleMap.has(lowerVal)) {
                         errors.push({
                             rawRowIndex: rowIndex,
                             fullKey: key,
@@ -4670,14 +5438,14 @@ const App: React.FC = () => {
                             employeeName: empName,
                             field: 'Contract Rule',
                             value: val,
-                            allowed: ruleNames
+                            allowed: [...ruleNames, 'REMOVE']
                         });
                     }
                 }
 
                 // 4. Country Code
                 else if (lowerHeader === 'country code') {
-                    if (countryCodeList.length > 0 && !countryCodeSet.has(lowerVal)) {
+                    if (lowerVal !== 'remove' && countryCodeList.length > 0 && !countryCodeSet.has(lowerVal)) {
                          errors.push({
                             rawRowIndex: rowIndex,
                             fullKey: key,
@@ -4685,14 +5453,14 @@ const App: React.FC = () => {
                             employeeName: empName,
                             field: 'Country Code',
                             value: val,
-                            allowed: countryCodeList
+                            allowed: [...countryCodeList, 'REMOVE']
                         });
                     }
                 }
 
                 // 5. Departments (x or xx)
                 else if (lowerHeader.startsWith('department -')) {
-                    if (lowerVal !== 'x' && lowerVal !== 'xx') {
+                    if (lowerVal !== 'x' && lowerVal !== 'xx' && lowerVal !== 'remove') {
                         errors.push({
                             rawRowIndex: rowIndex,
                             fullKey: key,
@@ -4700,14 +5468,16 @@ const App: React.FC = () => {
                             employeeName: empName,
                             field: headerName, 
                             value: val,
-                            allowed: ['x', 'xx']
+                            allowed: ['x', 'xx', 'REMOVE']
                         });
+                    } else if (lowerVal === 'xx') {
+                        primaryDeptKeys.push({key, val, header: headerName});
                     }
                 }
 
                 // 6. Skills (x)
                 else if (lowerHeader.startsWith('skill -')) {
-                    if (lowerVal !== 'x') {
+                    if (lowerVal !== 'x' && lowerVal !== 'remove') {
                         errors.push({
                             rawRowIndex: rowIndex,
                             fullKey: key,
@@ -4715,7 +5485,7 @@ const App: React.FC = () => {
                             employeeName: empName,
                             field: headerName,
                             value: val,
-                            allowed: ['x']
+                            allowed: ['x', 'REMOVE']
                         });
                     }
                 }
@@ -4743,7 +5513,7 @@ const App: React.FC = () => {
                             const validOptions = def.dropdownOptions;
                             const validOptionsLower = new Set(validOptions.map(o => o.toLowerCase()));
                             
-                            if (!validOptionsLower.has(lowerVal)) {
+                            if (lowerVal !== 'remove' && !validOptionsLower.has(lowerVal)) {
                                  errors.push({
                                     rawRowIndex: rowIndex,
                                     fullKey: key,
@@ -4751,12 +5521,12 @@ const App: React.FC = () => {
                                     employeeName: empName,
                                     field: def.description,
                                     value: val,
-                                    allowed: validOptions
+                                    allowed: [...validOptions, 'REMOVE']
                                 });
                             }
                         } else if (def.type === 'Boolean') {
                             // Checkbox type
-                            if (lowerVal !== 'x') {
+                            if (lowerVal !== 'x' && lowerVal !== 'remove') {
                                 errors.push({
                                     rawRowIndex: rowIndex,
                                     fullKey: key,
@@ -4764,7 +5534,7 @@ const App: React.FC = () => {
                                     employeeName: empName,
                                     field: def.description,
                                     value: val,
-                                    allowed: ['x']
+                                    allowed: ['x', 'REMOVE']
                                 });
                             }
                         } else if (def.type === 'Date') {
@@ -4779,13 +5549,25 @@ const App: React.FC = () => {
                                     allowed: ['Valid Date format (e.g. YYYY-MM-DD or DD.MM.YYYY)']
                                 });
                             }
+                        } else if (def.type === 'Numeric') {
+                            if (!isRemove && !/^-?\d+([.,]\d+)?$/.test(val)) {
+                                errors.push({
+                                    rawRowIndex: rowIndex,
+                                    fullKey: key,
+                                    row: rowNum,
+                                    employeeName: empName,
+                                    field: def.description,
+                                    value: val,
+                                    allowed: ['Numeric value only (e.g. 1500 or 1500.50)']
+                                });
+                            }
                         }
                     }
                 }
 
                 // 9. Assign Supervisor
                 else if (lowerHeader === 'assign supervisor') {
-                    if (!supervisorMap.has(lowerVal)) {
+                    if (lowerVal !== 'remove' && !supervisorMap.has(lowerVal)) {
                         errors.push({
                             rawRowIndex: rowIndex,
                             fullKey: key,
@@ -4830,7 +5612,7 @@ const App: React.FC = () => {
                 
                 // Fixed Salary - Amount
                 else if (lowerHeader === 'fixed salary - amount') {
-                    if (!/^\d+([.,]\d+)?$/.test(val)) {
+                    if (!isRemove && !/^\d+([.,]\d+)?$/.test(val)) {
                         errors.push({
                             rawRowIndex: rowIndex,
                             fullKey: key,
@@ -4845,7 +5627,7 @@ const App: React.FC = () => {
 
                 // Fixed Salary - Expected working hours
                 else if (lowerHeader === 'fixed salary - expected working hours') {
-                    if (!/^\d+([.,]\d+)?$/.test(val)) {
+                    if (!isRemove && !/^\d+([.,]\d+)?$/.test(val)) {
                         errors.push({
                             rawRowIndex: rowIndex,
                             fullKey: key,
@@ -4875,7 +5657,7 @@ const App: React.FC = () => {
 
                 // Group Rate
                 else if (lowerHeader.startsWith('group rate - ')) {
-                    if (!/^\d+([.,]\d+)?$/.test(val)) {
+                    if (!isRemove && !/^\d+([.,]\d+)?$/.test(val)) {
                         errors.push({
                             rawRowIndex: rowIndex,
                             fullKey: key,
@@ -4890,7 +5672,7 @@ const App: React.FC = () => {
 
                 // Mobile validation
                 else if (lowerHeader === 'mobile') {
-                    if (!/^\d+$/.test(val)) {
+                    if (!isRemove && !/^\d+$/.test(val)) {
                         errors.push({
                             rawRowIndex: rowIndex,
                             fullKey: key,
@@ -4977,6 +5759,20 @@ const App: React.FC = () => {
             });
 
             // Post-row validation checks
+            if (primaryDeptKeys.length > 1) {
+                primaryDeptKeys.forEach(dept => {
+                    errors.push({
+                        rawRowIndex: rowIndex,
+                        fullKey: dept.key,
+                        row: rowNum,
+                        employeeName: empName,
+                        field: `${dept.header} (Only 1 primary dept allowed)`,
+                        value: dept.val,
+                        allowed: ['x', 'xx']
+                    });
+                });
+            }
+
             if (hasFixedSalary) {
                 if (!fixedSalaryFields.period || !fixedSalaryFields.amount || !fixedSalaryFields.hours) {
                     errors.push({
@@ -5006,7 +5802,7 @@ const App: React.FC = () => {
             });
         });
 
-        return errors;
+        return errors.map(e => ({ ...e, originalValue: e.originalValue ?? e.value }));
     };
 
     const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -5034,7 +5830,7 @@ const App: React.FC = () => {
         }
     };
 
-    const processRows = async (json: any[], dateResolutions: AmbiguousDateItem[], isUSFormat: boolean, refetch: boolean = false) => {
+    const processRows = async (json: any[], dateResolutions: AmbiguousDateItem[], isUSFormat: boolean, refetch: boolean = false, isInitialProcessing: boolean = false) => {
         if (!definitions) return;
 
         if (refetch) {
@@ -5093,6 +5889,7 @@ const App: React.FC = () => {
             };
 
             const mainPayload: any = {};
+            let primaryDeptCount = 0;
 
             const parseAndLogDate = (raw: any, fieldName: string, fullKey: string) => {
                 const correctionKey = `${rowIndex}-${fullKey}`;
@@ -5237,7 +6034,7 @@ const App: React.FC = () => {
                     }
                 }
                 else if (lowerHeader.startsWith('fixed salary -')) {
-                    if (!review.payloads.fixedSalary) review.payloads.fixedSalary = { isDelete: false, data: { salaryTypeId: 0, hours: 0, salary: 0, from: '' } };
+                    if (!review.payloads.fixedSalary) review.payloads.fixedSalary = { isDelete: false, data: { salaryTypeId: 0, hours: 0, salary: 0, from: getTodayYYYYMMDD() } };
                     if (isDelete) review.payloads.fixedSalary.isDelete = true;
                     
                     const salData = review.payloads.fixedSalary.data!;
@@ -5248,7 +6045,10 @@ const App: React.FC = () => {
                     if (lowerHeader.includes('expected working hours')) salData.hours = parseDecimal(val);
                     if (lowerHeader.includes('amount')) salData.salary = parseDecimal(val);
                     if (lowerHeader.includes('salary code')) salData.salaryCode = val;
-                    if (lowerHeader.includes('valid from')) salData.from = parseAndLogDate(rawVal, headerName, key) || '';
+                    if (lowerHeader.includes('valid from')) {
+                        const parsedDate = parseAndLogDate(rawVal, headerName, key);
+                        salData.from = parsedDate || getTodayYYYYMMDD();
+                    }
                     
                     let salField = "";
                     if (lowerHeader.includes('period')) salField = "Period";
@@ -5283,6 +6083,9 @@ const App: React.FC = () => {
                         if (!review.payloads.departments) review.payloads.departments = { departments: [], primaryDepartmentId: null };
                         (review.payloads.departments as any)[deptId] = action;
                         review.changes.push(`Dept: ${deptName} (${action})`);
+                        if (action === 'primary') {
+                            primaryDeptCount++;
+                        }
                     }
                 }
                 else if (lowerHeader.startsWith('skill -')) {
@@ -5308,6 +6111,13 @@ const App: React.FC = () => {
             });
 
             if (Object.keys(mainPayload).length > 0) review.payloads.main = mainPayload;
+
+            if (primaryDeptCount > 1) {
+                if (!review.validationErrors) review.validationErrors = {};
+                review.validationErrors.departments = `Only 1 primary department (xx) permitted.`;
+                review.changes.push(`Dept: Invalid (Multiple primary departments)`);
+                review.status = 'error';
+            }
             
             if (review.changes.length === 0) {
                 review.status = 'no_updates';
@@ -5321,9 +6131,13 @@ const App: React.FC = () => {
             } else {
                 setError(null);
             }
+        } else {
+            setError(null);
         }
         setReviews(parsedReviews);
-        setDateReport(report);
+        if (isInitialProcessing) {
+            setDateReport(report);
+        }
         setSelectedReviewIds(new Set(parsedReviews.map(r => r.employeeId)));
         setCurrentStep('review');
     };
@@ -5420,7 +6234,11 @@ const App: React.FC = () => {
             // Sequential Update Logic
             
             // 1. Main Update
-            if (Object.keys(finalMainPayload).length > 0) {
+            if (item.validationErrors?.departments) {
+                updateResults.main = { success: false, message: item.validationErrors.departments };
+                overallSuccess = false;
+                failureMessages.push(`Main: ${item.validationErrors.departments}`);
+            } else if (Object.keys(finalMainPayload).length > 0) {
                 // If payload contains ONLY null/empty values (destructive), we pad with FirstName to satisfy API
                 if (mainIsDestructive) {
                     let nameToUse = current.firstName;
@@ -7114,11 +7932,77 @@ const App: React.FC = () => {
                             showWages={selectedSections.wages}
                             showSkills={selectedSections.skills}
                             onNext={async () => {
-                                setCurrentStep('generate_template');
-                                await generateAndDownloadTemplate();
+                                if (selectedSections.wages) {
+                                    setCurrentStep('configure_wages');
+                                } else {
+                                    setCurrentStep('generate_template');
+                                    await generateAndDownloadTemplate();
+                                }
                             }}
                             onBack={() => setCurrentStep('configure')}
                         />
+                    )}
+
+                    {currentStep === 'configure_wages' && (
+                        <div className="bg-white p-8 rounded-xl shadow-lg border border-gray-100 max-w-2xl mx-auto">
+                            <h2 className="text-2xl font-bold mb-4">Wage Template Options</h2>
+                            <p className="text-gray-500 mb-6">Select which additional columns should be included for the selected wages.</p>
+                            
+                            <div className="space-y-4 mb-4">
+                                <Checkbox 
+                                    label="Include Wage Type (Hourly or Shift Rate)" 
+                                    checked={includeWageType} 
+                                    onChange={setIncludeWageType} 
+                                />
+                                <Checkbox 
+                                    label="Include Valid From date" 
+                                    checked={includeValidFrom} 
+                                    onChange={setIncludeValidFrom} 
+                                />
+                                <Checkbox 
+                                    label="Include Salary Code" 
+                                    checked={includeSalaryCode} 
+                                    onChange={setIncludeSalaryCode} 
+                                />
+                            </div>
+                            
+                            <div className="mb-6">
+                                <button 
+                                    onClick={() => {
+                                        setIncludeWageType(false);
+                                        setIncludeValidFrom(false);
+                                        setIncludeSalaryCode(false);
+                                    }}
+                                    className="text-sm text-blue-600 hover:text-blue-800 font-medium underline"
+                                >
+                                    Only include Wage Rate
+                                </button>
+                            </div>
+                            
+                            <div className="bg-blue-50 p-4 border border-blue-100 rounded-lg mb-8">
+                                <p className="text-sm text-blue-800">
+                                    <strong>Tip:</strong> If you omit these columns, you can still easily bulk-set the wage type, valid from date, or salary code at a later stage after uploading the file.
+                                </p>
+                            </div>
+                            
+                            <div className="flex justify-between mt-8">
+                                <button 
+                                    onClick={() => setCurrentStep('select_fields')} 
+                                    className="text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 font-medium rounded-lg text-sm px-5 py-2.5 text-center inline-flex items-center"
+                                >
+                                    &larr; Back
+                                </button>
+                                <button 
+                                    onClick={async () => {
+                                        setCurrentStep('generate_template');
+                                        await generateAndDownloadTemplate();
+                                    }} 
+                                    className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700"
+                                >
+                                    Next &#8594;
+                                </button>
+                            </div>
+                        </div>
                     )}
 
                     {currentStep === 'generate_template' && (
@@ -7182,7 +8066,9 @@ const App: React.FC = () => {
                                     <hr className="my-8 border-gray-100" />
                                     <div className="flex justify-start">
                                         <button 
-                                            onClick={() => setCurrentStep(definitions ? 'select_fields' : 'configure')} 
+                                            onClick={() => setCurrentStep(
+                                                selectedSections.wages ? 'configure_wages' : (definitions ? 'select_fields' : 'configure')
+                                            )} 
                                             className="text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 font-medium rounded-lg text-sm px-5 py-2.5 text-center inline-flex items-center"
                                         >
                                             &larr; Back
@@ -7289,11 +8175,46 @@ const App: React.FC = () => {
                             availableTargets={generateTargetFields(definitions)}
                             onComplete={handleFieldMappingComplete}
                             onCancel={() => {
-                                setEmployeeMapping(new Map());
+                                const hasId = unmappedJson.length > 0 && "Planday Employee ID" in unmappedJson[0];
+                                if (!hasId) {
+                                    const newInitialResult = new Map<number, number|null>();
+                                    employeeMapping.forEach((val, key) => newInitialResult.set(key, val));
+                                    setInitialAutoMapping(newInitialResult);
+                                } else {
+                                    const newInitialResult = new Map<number, number|null>();
+                                    unmappedJson.forEach((row, idx) => {
+                                       const pid = row["Planday Employee ID"];
+                                       if (pid) newInitialResult.set(idx, parseInt(pid, 10));
+                                    });
+                                    setInitialAutoMapping(newInitialResult);
+                                }
                                 setCurrentStep('map_employees');
                             }}
                             initialMapping={fieldMapping}
                             onShowHelp={() => setShowHelpModal(true)}
+                            duplicateHeadersWarning={duplicateHeadersWarning}
+                            usedIdentityColumns={selectedIdentityColumns}
+                        />
+                    )}
+
+                    {currentStep === 'wage_type_selection' && (
+                        <WageTypeSelection 
+                            missingGroups={missingWageTypeGroups}
+                            hasExistingWageTypes={
+                                rawFileJson ? rawFileJson.some(row => 
+                                    missingWageTypeGroups.some(group => {
+                                        const rateKey = `UPDATE - Group Rate - ${group}`;
+                                        const wageTypeKey = `UPDATE - Group Wage Type - ${group}`;
+                                        return row[rateKey] && String(row[rateKey]).trim() !== '' && String(row[rateKey]).trim() !== 'REMOVE' &&
+                                               row[wageTypeKey] && String(row[wageTypeKey]).trim() !== '';
+                                    })
+                                ) : false
+                            }
+                            onComplete={handleWageTypeSelectionsComplete}
+                            onBack={() => {
+                                setMissingWageTypeGroups([]);
+                                setCurrentStep('map_fields');
+                            }}
                         />
                     )}
 
@@ -7315,6 +8236,7 @@ const App: React.FC = () => {
                                 }
                             }}
                             onUpdateValue={handleUpdateErrorValue}
+                            onBulkUpdateValues={handleBulkUpdateErrorValues}
                             onRevalidate={handleRevalidate}
                             onSkipFields={handleSkipInvalidFields}
                             onContinueWithErrors={handleContinueWithInvalidFields}
@@ -7328,7 +8250,7 @@ const App: React.FC = () => {
                                 setAmbiguousDates(prev => prev.map(item => item.id === id ? { ...item, selectedCentury: century } : item));
                             }}
                             onContinue={() => {
-                                if (rawFileJson) processRows(rawFileJson, ambiguousDates, detectedUSFormat, true);
+                                if (rawFileJson) processRows(rawFileJson, ambiguousDates, detectedUSFormat, true, true);
                             }}
                             onBack={() => setCurrentStep('upload')}
                         />

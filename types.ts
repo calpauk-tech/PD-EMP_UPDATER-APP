@@ -107,6 +107,7 @@ export interface EmployeeUpdateReview {
     validationErrors?: {
         supervisor?: string;
         contract?: string;
+        departments?: string;
     };
 }
 
