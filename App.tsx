@@ -1861,7 +1861,7 @@ const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initia
                         </div>
                         <div className="ml-3">
                             <h3 className="text-sm font-medium text-blue-800">
-                                {rows.length > 0 && Object.keys(rows[0]).includes("Planday Employee ID") ? "Matching by Planday Employee ID" : "Matching by Salary Identifier (Payroll ID)"}
+                                {rows.some(row => "Planday Employee ID" in row) ? "Matching by Planday Employee ID" : "Matching by Salary Identifier (Payroll ID)"}
                             </h3>
                             <div className="mt-2 text-sm text-blue-700">
                                 <p>We have matched employees based on the selected column. Please review any unmapped rows below.</p>
@@ -1872,7 +1872,7 @@ const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initia
             )}
 
             <h2 className="text-2xl font-bold mb-4">Map Employees</h2>
-            {rows.length > 0 && Object.keys(rows[0]).includes("Planday Employee ID") ? (
+            {rows.some(row => "Planday Employee ID" in row) ? (
                 <p className="text-gray-500 mb-6">
                     Employees have been automatically matched using their Planday Employee ID. Please review the mapping below.
                 </p>
@@ -2095,14 +2095,18 @@ const FieldMapperRow: React.FC<{
         <tr className={`hover:bg-gray-50 ${(isUnmapped && !isIdentity) ? 'bg-[#ffe5e5]' : ''}`}>
             <td className="p-3 font-medium text-gray-800 align-middle">{header}</td>
             <td className="p-3 align-middle">
-                <SearchableSelect 
-                    options={sortedOptions}
-                    value={currentTarget}
-                    onChange={(val) => onSelect(header, val)}
-                    placeholder={isIdentity ? "Already Mapped (Identity)" : "-- Ignore --"}
-                    usedValues={usedTargets}
-                    matchStatus={matchStatus}
-                />
+                {isIdentity ? (
+                    <span className="text-gray-400 italic">Already Mapped (Identity)</span>
+                ) : (
+                    <SearchableSelect 
+                        options={sortedOptions}
+                        value={currentTarget}
+                        onChange={(val) => onSelect(header, val)}
+                        placeholder="-- Ignore --"
+                        usedValues={usedTargets}
+                        matchStatus={matchStatus}
+                    />
+                )}
             </td>
         </tr>
     );
@@ -2134,7 +2138,7 @@ const FieldMapper: React.FC<FieldMapperProps> = ({ fileHeaders, availableTargets
             
             // Check for identity fields
             if (usedIdentityColumns && usedIdentityColumns.length > 0) {
-                if (usedIdentityColumns.includes(header) || lower === 'planday employee id') {
+                if (usedIdentityColumns.some(c => c.toLowerCase() === lower) || lower === 'planday employee id') {
                      identity.add(header);
                      newMap.set(header, 'IDENTITY_IGNORE');
                      return;
@@ -2367,7 +2371,7 @@ const FieldMapper: React.FC<FieldMapperProps> = ({ fileHeaders, availableTargets
     }, [availableTargets, usedTargets]);
 
     const mappedCount = mapping.size;
-    const ignorableCount = fileHeaders.length - mappedCount - identityHeaders.size;
+    const ignorableCount = fileHeaders.length - mappedCount;
 
     const finalHeadersForDisplay = useMemo(() => {
         let headers = [...fileHeaders];
@@ -2809,7 +2813,9 @@ interface DateLogItem {
 
 const getNonEmptyHeaders = (json: any[]) => {
     if (!json || json.length === 0) return [];
-    const headers = Object.keys(json[0]);
+    const headerSet = new Set<string>();
+    json.forEach(row => Object.keys(row).forEach(k => headerSet.add(k)));
+    const headers = Array.from(headerSet);
     const lowerHeaders = new Set(headers.map(h => h.toLowerCase()));
     return headers.filter(h => {
         // If there's an 'UPDATE - ' version of this header, we exclude the "original" informational column
@@ -4661,7 +4667,7 @@ const App: React.FC = () => {
                 // Clear previous custom mapping state
                 setUnmappedJson([]);
                 
-                const headers = Object.keys(json[0]);
+                const headers = Array.from(new Set(json.flatMap(row => Object.keys(row))));
                 const hasIdColumn = headers.includes("Planday Employee ID");
 
                 const targetFields = generateTargetFields(definitions);
@@ -4711,7 +4717,7 @@ const App: React.FC = () => {
                        });
                        setEmployeeMapping(empMapping);
                        setSelectedIdentityMethod('ID');
-                       setSelectedIdentityColumns(['Planday Employee ID']);
+                       setSelectedIdentityColumns(['Planday Employee ID', 'First Name', 'Last Name', 'Salary Identifier (Payroll ID)']);
                        setCurrentStep('map_fields');
                     } else {
                        // Route to Identity Selection Method
@@ -5192,7 +5198,7 @@ const App: React.FC = () => {
 
         const dateKeys: string[] = [];
         if (json.length > 0) {
-            Object.keys(json[0]).forEach(key => {
+            Array.from(new Set(json.flatMap(row => Object.keys(row)))).forEach(key => {
                 if (!key.startsWith('UPDATE - ')) return;
                 const headerName = key.substring(9).trim().toLowerCase();
                 
@@ -5225,7 +5231,7 @@ const App: React.FC = () => {
 
         const dateKeys: string[] = [];
         if (json.length > 0) {
-            Object.keys(json[0]).forEach(key => {
+            Array.from(new Set(json.flatMap(row => Object.keys(row)))).forEach(key => {
                 if (!key.startsWith('UPDATE - ')) return;
                 const headerName = key.substring(9).trim().toLowerCase();
                 
@@ -8175,7 +8181,7 @@ const App: React.FC = () => {
                             availableTargets={generateTargetFields(definitions)}
                             onComplete={handleFieldMappingComplete}
                             onCancel={() => {
-                                const hasId = unmappedJson.length > 0 && "Planday Employee ID" in unmappedJson[0];
+                                const hasId = getNonEmptyHeaders(unmappedJson).includes("Planday Employee ID");
                                 if (!hasId) {
                                     const newInitialResult = new Map<number, number|null>();
                                     employeeMapping.forEach((val, key) => newInitialResult.set(key, val));
