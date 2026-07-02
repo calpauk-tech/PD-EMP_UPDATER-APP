@@ -1281,13 +1281,14 @@ const ValidationErrorsView: React.FC<{
 
 // --- Wage Type Selection Component ---
 interface WageTypeSelectionProps {
+    isLoading?: boolean;
     missingGroups: string[];
     hasExistingWageTypes: boolean;
     onComplete: (selections: Map<string, string>, overwrite: boolean, validFromDate: string) => void;
     onBack: () => void;
 }
 
-const WageTypeSelection: React.FC<WageTypeSelectionProps> = ({ missingGroups, hasExistingWageTypes, onComplete, onBack }) => {
+const WageTypeSelection: React.FC<WageTypeSelectionProps> = ({ missingGroups, hasExistingWageTypes, onComplete, onBack, isLoading }) => {
     const [globalMode, setGlobalMode] = useState<'HourlyRate' | 'ShiftRate' | 'PER_GROUP' | null>(null);
     const [groupSelections, setGroupSelections] = useState<Map<string, string>>(new Map());
     const [showConfirm, setShowConfirm] = useState<'ALL_HOURLY' | 'ALL_SHIFT' | 'CLEAR_ALL' | 'CONTINUE' | null>(null);
@@ -1516,12 +1517,13 @@ const WageTypeSelection: React.FC<WageTypeSelectionProps> = ({ missingGroups, ha
 // --- Employee & Field Mapping Components ---
 
 interface IdentitySelectorProps {
+    isLoading?: boolean;
     headers: string[];
     onNext: (method: 'NAME' | 'ID', config?: any) => void;
     onBack: () => void;
 }
 
-const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, onBack }) => {
+const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, onBack, isLoading }) => {
     const [method, setMethod] = useState<'NAME' | 'ID'>('ID');
     const [selectedColumn, setSelectedColumn] = useState('');
     
@@ -1658,6 +1660,7 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
 };
 
 interface EmployeeMapperProps {
+    isLoading?: boolean;
     rows: any[];
     employees: Employee[];
     initialMapping?: Map<number, number | null>;
@@ -1668,7 +1671,7 @@ interface EmployeeMapperProps {
     onShowHelp?: () => void;
 }
 
-const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initialMapping, matchMethod = 'NAME', onComplete, onCancel, onBack, onShowHelp }) => {
+const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initialMapping, matchMethod = 'NAME', onComplete, onCancel, onBack, onShowHelp, isLoading }) => {
     // Attempt auto-match on mount if initialMapping not provided
     const [mapping, setMapping] = useState<Map<number, number | null>>(new Map());
     const [showUnmappedFirst, setShowUnmappedFirst] = useState(false);
@@ -1969,7 +1972,8 @@ const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initia
             
             <div className="flex justify-end gap-4">
                 <button onClick={onCancel} className="text-gray-600 hover:text-gray-900 px-4">Cancel</button>
-                <button onClick={handleContinue} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700">
+                <button onClick={handleContinue} disabled={isLoading} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+{isLoading && <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>}
                     Next: Map Fields
                 </button>
             </div>
@@ -1993,6 +1997,7 @@ interface TargetField {
 }
 
 interface FieldMapperProps {
+    isLoading?: boolean;
     fileHeaders: string[];
     availableTargets: TargetField[];
     onComplete: (mapping: Map<string, string>) => void;
@@ -2133,7 +2138,7 @@ const FieldMapperRow: React.FC<{
     );
 };
 
-const FieldMapper: React.FC<FieldMapperProps> = ({ fileHeaders, availableTargets, onComplete, onCancel, initialMapping, onShowHelp, duplicateHeadersWarning, usedIdentityColumns }) => {
+const FieldMapper: React.FC<FieldMapperProps> = ({ fileHeaders, availableTargets, onComplete, onCancel, initialMapping, onShowHelp, duplicateHeadersWarning, usedIdentityColumns, isLoading }) => {
     const [mapping, setMapping] = useState<Map<string, string>>(new Map());
     const [identityHeaders, setIdentityHeaders] = useState<Set<string>>(new Set());
     const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -2574,7 +2579,8 @@ const FieldMapper: React.FC<FieldMapperProps> = ({ fileHeaders, availableTargets
 
             <div className="flex justify-end gap-4">
                 <button onClick={onCancel} className="text-gray-600 hover:text-gray-900 px-4">Back</button>
-                <button onClick={handleProcess} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700">
+                <button onClick={handleProcess} disabled={isLoading} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+{isLoading && <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>}
                     Next
                 </button>
             </div>
@@ -2595,7 +2601,8 @@ const FieldMapper: React.FC<FieldMapperProps> = ({ fileHeaders, availableTargets
                              <button onClick={() => setShowConfirmModal(false)} className="px-5 py-2.5 rounded-lg font-medium text-gray-700 bg-gray-100 hover:bg-gray-200">
                                  Cancel
                              </button>
-                             <button onClick={confirmProcess} className="px-5 py-2.5 rounded-lg font-bold text-white bg-blue-600 hover:bg-blue-700">
+                             <button onClick={confirmProcess} disabled={isLoading} className="px-5 py-2.5 rounded-lg font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+{isLoading && <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>}
                                  Continue
                              </button>
                         </div>
@@ -2763,7 +2770,8 @@ const DateAmbiguityResolver: React.FC<{
 
             <div className="flex justify-end gap-4">
                 <button onClick={onBack} className="text-gray-600 hover:text-gray-900 px-4">Back</button>
-                <button onClick={onContinue} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 flex items-center gap-2">
+                <button onClick={onContinue} disabled={isLoading} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+{isLoading && <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>}
                     Confirm & Continue
                 </button>
             </div>
@@ -4666,7 +4674,7 @@ const App: React.FC = () => {
         if (!definitions) { setError("Definitions missing. Please go back to Configure step."); return; }
         
         setIsLoading(true);
-        setLoadingText("Parsing file... This might take a while if the file is large, please click 'Wait' if the browser prompts you.");
+        setLoadingText("Parsing file...");
         setError(null);
         setDateReport([]); 
         
@@ -4778,7 +4786,7 @@ const App: React.FC = () => {
                     
                     // Need employees list for mapping
                     if (allEmployees.length === 0) {
-                        setLoadingText("Fetching current employees for mapping... This might take a while if the file is large, please click 'Wait' if the browser prompts you.");
+                        setLoadingText("Fetching current employees for mapping...");
                         const employees = await fetchEmployees();
                         setAllEmployees(employees);
                     }
@@ -4883,7 +4891,7 @@ const App: React.FC = () => {
 
     const handleIdentityMethodSelection = (method: 'NAME' | 'ID', config?: any) => {
         setIsLoading(true);
-        setLoadingText("Identifying employees... This might take a while if the file is large, please click 'Wait' if the browser prompts you.");
+        setLoadingText("Identifying employees...");
         
         setTimeout(() => {
             setSelectedIdentityMethod(method);
@@ -4986,7 +4994,7 @@ const App: React.FC = () => {
 
     const handleEmployeeMappingComplete = (mapping: Map<number, number>) => {
         setIsLoading(true);
-        setLoadingText("Preparing field mappings... This might take a while if the file is large, please click 'Wait' if the browser prompts you.");
+        setLoadingText("Preparing field mappings...");
         setTimeout(() => {
             setEmployeeMapping(mapping);
             setIsLoading(false);
@@ -4997,7 +5005,7 @@ const App: React.FC = () => {
     const handleRevalidate = () => {
         if (!rawFileJson) return;
         setIsLoading(true);
-        setLoadingText("Re-validating... This might take a while if the file is large, please click 'Wait' if the browser prompts you.");
+        setLoadingText("Re-validating...");
         setTimeout(() => {
             const valErrors = validateData(rawFileJson);
             if (valErrors.length > 0) {
@@ -5165,7 +5173,7 @@ const App: React.FC = () => {
     const handleFieldMappingComplete = (mapping: Map<string, string>) => {
         setFieldMapping(mapping);
         setIsLoading(true);
-        setLoadingText("Applying mappings... This might take a while if the file is large, please click 'Wait' if the browser prompts you.");
+        setLoadingText("Applying mappings...");
 
         setTimeout(() => {
             try {
@@ -7912,12 +7920,13 @@ const App: React.FC = () => {
                 </div>
 
                 <main className="max-w-7xl mx-auto w-full relative">
-                    {isLoading && ['identity_method', 'map_employees', 'map_fields', 'resolve_dates', 'review'].includes(currentStep) && (
-                        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-gray-900 bg-opacity-50 backdrop-blur-sm transition-opacity">
-                            <div className="bg-white p-8 rounded-xl shadow-2xl flex flex-col items-center max-w-sm w-full text-center">
-                                <Loader text="" />
-                                <p className="mt-4 text-gray-700 font-medium">{loadingText || "Processing..."}</p>
+                    {isLoading && ['identity_method', 'map_employees', 'map_fields', 'resolve_dates', 'review', 'wage_type_selection', 'configure', 'upload'].includes(currentStep) && (
+                        <div className="fixed bottom-0 left-0 right-0 z-[100] bg-blue-600 text-white px-6 py-4 shadow-lg flex flex-col md:flex-row items-center justify-center gap-2 md:gap-4">
+                            <div className="flex items-center space-x-4">
+                                <svg className="animate-spin h-6 w-6 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                <p className="font-bold text-lg">{loadingText || "Processing..."}</p>
                             </div>
+                            <p className="text-blue-100 text-sm md:border-l md:border-blue-400 md:pl-4">This might take a while if the file is large, please click 'Wait' if the browser prompts you.</p>
                         </div>
                     )}
                     {error && <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded shadow">{error}</div>}
@@ -8045,12 +8054,14 @@ const App: React.FC = () => {
                                                 >
                                                     Can I use my own template/file?
                                                 </button>
-                                                <button onClick={handleGoToUpload} disabled={isLoading} className="bg-green-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-green-700">
+                                                <button onClick={handleGoToUpload} disabled={isLoading} className="bg-green-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-green-700 disabled:opacity-50 flex items-center gap-2">
+{isLoading && <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>}
                                                     I have Excel file ready
                                                 </button>
                                             </>
                                         )}
-                                        <button onClick={handleDownloadTemplate} disabled={isLoading} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700">
+                                        <button onClick={handleDownloadTemplate} disabled={isLoading} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+{isLoading && <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>}
                                             {updateMethod === 'excel' ? 'Generate Template File' : <>Next &#8594;</>}
                                         </button>
                                     </div>
@@ -8287,7 +8298,7 @@ const App: React.FC = () => {
                     )}
 
                     {currentStep === 'identity_method' && (
-                        <IdentitySelector 
+                        <IdentitySelector isLoading={isLoading} 
                             headers={getNonEmptyHeaders(unmappedJson)}
                             onNext={handleIdentityMethodSelection}
                             onBack={() => {
@@ -8298,7 +8309,7 @@ const App: React.FC = () => {
                     )}
 
                     {currentStep === 'map_employees' && (
-                        <EmployeeMapper 
+                        <EmployeeMapper isLoading={isLoading} 
                             rows={unmappedJson} 
                             employees={allEmployees}
                             initialMapping={initialAutoMapping}
@@ -8316,7 +8327,7 @@ const App: React.FC = () => {
                     )}
 
                     {currentStep === 'map_fields' && definitions && (
-                        <FieldMapper 
+                        <FieldMapper isLoading={isLoading} 
                             fileHeaders={getNonEmptyHeaders(unmappedJson)}
                             availableTargets={generateTargetFields(definitions)}
                             onComplete={handleFieldMappingComplete}
@@ -8344,7 +8355,7 @@ const App: React.FC = () => {
                     )}
 
                     {currentStep === 'wage_type_selection' && (
-                        <WageTypeSelection 
+                        <WageTypeSelection isLoading={isLoading} 
                             missingGroups={missingWageTypeGroups}
                             hasExistingWageTypes={
                                 rawFileJson ? rawFileJson.some(row => 
@@ -8390,7 +8401,7 @@ const App: React.FC = () => {
                     )}
 
                     {currentStep === 'resolve_dates' && (
-                        <DateAmbiguityResolver 
+                        <DateAmbiguityResolver isLoading={isLoading} 
                             items={ambiguousDates}
                             onUpdate={(id, century) => {
                                 setAmbiguousDates(prev => prev.map(item => item.id === id ? { ...item, selectedCentury: century } : item));
