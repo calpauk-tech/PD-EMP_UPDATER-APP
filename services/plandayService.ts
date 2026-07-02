@@ -6,6 +6,7 @@ const API_BASE_URL = 'https://openapi.planday.com';
 let credentials_internal: PlandayApiCredentials | null = null;
 let accessToken: string | null = null;
 let tokenExpiry: number | null = null;
+let globalDelayUntil = 0;
 
 export function initializeService(credentials: PlandayApiCredentials) {
     if (credentials_internal?.clientId !== credentials.clientId || credentials_internal?.refreshToken !== credentials.refreshToken) {
@@ -71,6 +72,11 @@ async function getAccessToken(): Promise<string> {
 async function fetchWithAuth(url: string, options: RequestInit = { method: 'GET' }, retries = 5, backoffDelay = 2000): Promise<Response> {
     if (!credentials_internal) throw new Error("Service not initialized");
 
+    const now = Date.now();
+    if (globalDelayUntil > now) {
+        await wait(globalDelayUntil - now);
+    }
+
     const token = await getAccessToken();
     const headers = {
         ...options.headers,
@@ -95,12 +101,24 @@ async function fetchWithAuth(url: string, options: RequestInit = { method: 'GET'
                      waitTime = (parseInt(xRateLimitReset, 10) + 1) * 1000;
                 }
 
-                // Cap max wait to 10s
-                waitTime = Math.min(waitTime, 10000); 
+                // Set global delay so other concurrent requests also wait
+                globalDelayUntil = Math.max(globalDelayUntil, Date.now() + waitTime);
 
                 console.warn(`Rate limited (429). Retrying in ${waitTime}ms...`);
                 await wait(waitTime);
                 return fetchWithAuth(url, options, retries - 1, backoffDelay);
+            }
+        }
+
+        // Proactive Rate Limiting checks
+        if (response.ok) {
+            const remaining = response.headers.get('x-ratelimit-remaining');
+            const reset = response.headers.get('x-ratelimit-reset');
+            if (remaining !== null && reset !== null) {
+                if (parseInt(remaining, 10) === 0) {
+                    const waitTime = (parseInt(reset, 10) + 1) * 1000;
+                    globalDelayUntil = Math.max(globalDelayUntil, Date.now() + waitTime);
+                }
             }
         }
 
