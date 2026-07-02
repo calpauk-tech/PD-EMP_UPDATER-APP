@@ -3554,6 +3554,7 @@ const App: React.FC = () => {
     const [currentStep, setCurrentStep] = useState<AppStep>('auth');
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [showLoadingBar, setShowLoadingBar] = useState(false);
     const [loadingText, setLoadingText] = useState('');
     const [progress, setProgress] = useState(0); 
     const [totalItems, setTotalItems] = useState(0);
@@ -3755,6 +3756,18 @@ const App: React.FC = () => {
     const [isMissingFieldsExpanded, setIsMissingFieldsExpanded] = useState(false);
 
     const wakeLockRef = useRef<any>(null);
+
+    useEffect(() => {
+        let timer: any;
+        if (isLoading) {
+            timer = setTimeout(() => {
+                setShowLoadingBar(true);
+            }, 2000);
+        } else {
+            setShowLoadingBar(false);
+        }
+        return () => clearTimeout(timer);
+    }, [isLoading]);
 
     useEffect(() => {
         const saved = sessionStorage.getItem('plandayCredentials');
@@ -7594,9 +7607,6 @@ const App: React.FC = () => {
         else if (fieldKey === "ALL_DEPARTMENTS") {
             definitions.departments.forEach(d => fieldsToAdd.push(`UPDATE - Department - ${d.name.trim()}`));
         }
-        else if (fieldKey === "ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM") {
-            fieldsToAdd.push("UPDATE - ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM");
-        }
         else if (fieldKey === "ALL_EMPLOYEE_GROUPS") {
             definitions.employeeGroups.forEach(g => {
                 fieldsToAdd.push(`UPDATE - Group Rate - ${g.name.trim()}`);
@@ -7758,7 +7768,6 @@ const App: React.FC = () => {
         if (hasDepartments) options.push({ value: "ALL_DEPARTMENTS", label: "✨ All Departments" });
         if (hasGroups) {
             options.push({ value: "ALL_EMPLOYEE_GROUPS", label: "✨ All Employee groups (wages)" });
-            options.push({ value: "ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM", label: "✨ All Employee groups rates valid from" });
         }
         if (hasSkills) options.push({ value: "ALL_SKILLS", label: "✨ All Skills" });
 
@@ -7811,6 +7820,25 @@ const App: React.FC = () => {
                         }
                     });
                     newFileJson[rowIndex] = updatedRow;
+                } else if (bulkEditField === 'UPDATE - ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM') {
+                    const visibleGroups = new Set<string>();
+                    Array.from(getUpdateColumns).forEach(col => {
+                        if (col.startsWith('UPDATE - Group Rate - ')) visibleGroups.add(col.replace('UPDATE - Group Rate - ', ''));
+                        if (col.startsWith('UPDATE - Group Wage Type - ')) visibleGroups.add(col.replace('UPDATE - Group Wage Type - ', ''));
+                        if (col.startsWith('UPDATE - Group Valid From - ')) visibleGroups.add(col.replace('UPDATE - Group Valid From - ', ''));
+                        if (col.startsWith('UPDATE - Group Salary Code - ')) visibleGroups.add(col.replace('UPDATE - Group Salary Code - ', ''));
+                    });
+                    
+                    const updatedRow = { ...newFileJson[rowIndex] };
+                    visibleGroups.forEach(groupName => {
+                        const targetCol = `UPDATE - Group Valid From - ${groupName}`;
+                        if (updatedRow[targetCol] !== bulkEditValue) {
+                            updatedRow[targetCol] = bulkEditValue;
+                            hasChanges = true;
+                            newExplicit.add(targetCol);
+                        }
+                    });
+                    newFileJson[rowIndex] = updatedRow;
                 } else {
                     if (newFileJson[rowIndex][bulkEditField] !== bulkEditValue) {
                         newFileJson[rowIndex] = { ...row, [bulkEditField]: bulkEditValue };
@@ -7831,6 +7859,19 @@ const App: React.FC = () => {
         if (definitions && definitions.departments.length > 0 && hasDepartmentColumn) {
             options.unshift({ value: 'PRIMARY_DEPARTMENT', label: 'Primary Department' });
         }
+
+        const visibleGroups = new Set<string>();
+        Array.from(getUpdateColumns).forEach(col => {
+            if (col.startsWith('UPDATE - Group Rate - ')) visibleGroups.add(col.replace('UPDATE - Group Rate - ', ''));
+            if (col.startsWith('UPDATE - Group Wage Type - ')) visibleGroups.add(col.replace('UPDATE - Group Wage Type - ', ''));
+            if (col.startsWith('UPDATE - Group Valid From - ')) visibleGroups.add(col.replace('UPDATE - Group Valid From - ', ''));
+            if (col.startsWith('UPDATE - Group Salary Code - ')) visibleGroups.add(col.replace('UPDATE - Group Salary Code - ', ''));
+        });
+        
+        if (visibleGroups.size > 1) {
+            options.unshift({ value: 'UPDATE - ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM', label: 'All Employee groups rates valid from' });
+        }
+
         return options;
     }, [getUpdateColumns, definitions]);
 
@@ -7920,10 +7961,10 @@ const App: React.FC = () => {
                 </div>
 
                 <main className="max-w-7xl mx-auto w-full relative">
-                    {isLoading && ['identity_method', 'map_employees', 'map_fields', 'resolve_dates', 'review', 'wage_type_selection', 'configure', 'upload'].includes(currentStep) && (
+                    {showLoadingBar && ['identity_method', 'map_employees', 'map_fields', 'resolve_dates', 'review', 'wage_type_selection', 'configure', 'upload'].includes(currentStep) && (
                         <div className="fixed bottom-0 left-0 right-0 z-[100] bg-blue-600 text-white px-6 py-4 shadow-lg flex flex-col md:flex-row items-center justify-center gap-2 md:gap-4">
                             <div className="flex items-center space-x-4">
-                                <svg className="animate-spin h-6 w-6 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                                 <p className="font-bold text-lg">{loadingText || "Processing..."}</p>
                             </div>
                             <p className="text-blue-100 text-sm md:border-l md:border-blue-400 md:pl-4">This might take a while if the file is large, please click 'Wait' if the browser prompts you.</p>
