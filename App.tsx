@@ -1284,16 +1284,26 @@ interface WageTypeSelectionProps {
     isLoading?: boolean;
     missingGroups: string[];
     hasExistingWageTypes: boolean;
+    hasMissingValidFromDates?: boolean;
     onComplete: (selections: Map<string, string>, overwrite: boolean, validFromDate: string) => void;
     onBack: () => void;
 }
 
-const WageTypeSelection: React.FC<WageTypeSelectionProps> = ({ missingGroups, hasExistingWageTypes, onComplete, onBack, isLoading }) => {
+const WageTypeSelection: React.FC<WageTypeSelectionProps> = ({ missingGroups, hasExistingWageTypes, hasMissingValidFromDates, onComplete, onBack, isLoading }) => {
     const [globalMode, setGlobalMode] = useState<'HourlyRate' | 'ShiftRate' | 'PER_GROUP' | null>(null);
     const [groupSelections, setGroupSelections] = useState<Map<string, string>>(new Map());
     const [showConfirm, setShowConfirm] = useState<'ALL_HOURLY' | 'ALL_SHIFT' | 'CLEAR_ALL' | 'CONTINUE' | null>(null);
     const [formError, setFormError] = useState<string | null>(null);
-    const [validFromDate, setValidFromDate] = useState<string>("");
+    const [validFromOption, setValidFromOption] = useState<'today' | 'custom' | 'table'>(hasMissingValidFromDates ? 'today' : 'table');
+    const [customValidFromDate, setCustomValidFromDate] = useState<string>(new Date().toISOString().split('T')[0]);
+
+    useEffect(() => {
+        if (hasMissingValidFromDates) {
+            setValidFromOption('today');
+        } else {
+            setValidFromOption('table');
+        }
+    }, [hasMissingValidFromDates]);
 
     const handleCheck = (group: string, type: 'HourlyRate' | 'ShiftRate') => {
         const newMap = new Map(groupSelections);
@@ -1320,12 +1330,21 @@ const WageTypeSelection: React.FC<WageTypeSelectionProps> = ({ missingGroups, ha
     };
 
     const submitSelections = (overwrite: boolean) => {
+        let finalDate = "";
+        if (hasMissingValidFromDates) {
+            if (validFromOption === 'today') {
+                finalDate = new Date().toISOString().split('T')[0];
+            } else if (validFromOption === 'custom') {
+                finalDate = customValidFromDate;
+            }
+        }
+        
         if (globalMode === 'HourlyRate' || globalMode === 'ShiftRate') {
             const result = new Map<string, string>();
             missingGroups.forEach(g => result.set(g, globalMode));
-            onComplete(result, overwrite, validFromDate);
+            onComplete(result, overwrite, finalDate);
         } else if (globalMode === 'PER_GROUP') {
-            onComplete(groupSelections, overwrite, validFromDate);
+            onComplete(groupSelections, overwrite, finalDate);
         }
     };
 
@@ -1467,6 +1486,59 @@ const WageTypeSelection: React.FC<WageTypeSelectionProps> = ({ missingGroups, ha
                     </div>
                 </div>
             </div>
+
+            {hasMissingValidFromDates && (
+                <div className="mb-8 p-6 bg-yellow-50 border border-yellow-200 rounded-xl">
+                    <h3 className="text-lg font-bold text-yellow-900 mb-2">Group Rate Valid From</h3>
+                    <p className="text-sm text-yellow-800 mb-4">
+                        Some group rates are missing a 'Valid From' date. Please select how you want to handle this:
+                    </p>
+                    <div className="space-y-3">
+                        <label className="flex items-center gap-3 p-3 bg-white border border-yellow-200 rounded-lg cursor-pointer hover:bg-yellow-50/50 transition-colors">
+                            <input 
+                                type="radio" 
+                                name="validFromOption" 
+                                value="today" 
+                                checked={validFromOption === 'today'}
+                                onChange={() => setValidFromOption('today')}
+                                className="w-4 h-4 text-yellow-600 focus:ring-yellow-500"
+                            />
+                            <span className="font-medium text-yellow-900">Set all to today ({new Date().toISOString().split('T')[0]})</span>
+                        </label>
+                        <label className="flex items-center gap-3 p-3 bg-white border border-yellow-200 rounded-lg cursor-pointer hover:bg-yellow-50/50 transition-colors">
+                            <input 
+                                type="radio" 
+                                name="validFromOption" 
+                                value="custom" 
+                                checked={validFromOption === 'custom'}
+                                onChange={() => setValidFromOption('custom')}
+                                className="w-4 h-4 text-yellow-600 focus:ring-yellow-500"
+                            />
+                            <div className="flex items-center gap-2">
+                                <span className="font-medium text-yellow-900">Set all to custom:</span>
+                                <input 
+                                    type="date" 
+                                    disabled={validFromOption !== 'custom'}
+                                    value={customValidFromDate}
+                                    onChange={(e) => setCustomValidFromDate(e.target.value)}
+                                    className="border border-gray-300 rounded px-2 py-1 text-sm disabled:opacity-50 disabled:bg-gray-100 focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 outline-none"
+                                />
+                            </div>
+                        </label>
+                        <label className="flex items-center gap-3 p-3 bg-white border border-yellow-200 rounded-lg cursor-pointer hover:bg-yellow-50/50 transition-colors">
+                            <input 
+                                type="radio" 
+                                name="validFromOption" 
+                                value="table" 
+                                checked={validFromOption === 'table'}
+                                onChange={() => setValidFromOption('table')}
+                                className="w-4 h-4 text-yellow-600 focus:ring-yellow-500"
+                            />
+                            <span className="font-medium text-yellow-900">Set dates in the update table</span>
+                        </label>
+                    </div>
+                </div>
+            )}
 
             <div className="flex justify-between items-center bg-gray-50 -mx-8 -mb-8 p-4 rounded-b-xl border-t border-gray-100">
                  <button onClick={onBack} className="text-gray-600 font-medium hover:text-gray-900 px-4 py-2">
@@ -5208,8 +5280,10 @@ const App: React.FC = () => {
                     };
 
                     const groupOrderForRates: string[] = [];
-                    // Map fields
-                    Object.keys(row).forEach(header => {
+                    const mappedHeaders = Array.from(mapping.keys());
+
+                    // Map fields - Pass 1: Groups and Departments (to establish defaults like "x")
+                    mappedHeaders.forEach(header => {
                         const targetKey = mapping.get(header);
                         if (targetKey === 'ALL_DEPARTMENTS') {
                             const val = String(row[header] || '');
@@ -5230,26 +5304,35 @@ const App: React.FC = () => {
                                     groupOrderForRates.push(matchingGroup.name.trim());
                                 }
                             });
-                        } else if (targetKey && targetKey !== 'IDENTITY_IGNORE' && targetKey !== 'ALL_EMPLOYEE_GROUPS_RATES' && targetKey !== 'ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM' && targetKey !== 'ALL_WAGE_SALARY_VALID_FROM') {
+                        }
+                    });
+
+                    // Map fields - Pass 2: Specific target keys (so they can overwrite the default "x" with "" if blank)
+                    mappedHeaders.forEach(header => {
+                        const targetKey = mapping.get(header);
+                        if (targetKey && targetKey !== 'IDENTITY_IGNORE' && targetKey !== 'ALL_DEPARTMENTS' && targetKey !== 'ALL_EMPLOYEE_GROUPS' && targetKey !== 'ALL_EMPLOYEE_GROUPS_RATES' && targetKey !== 'ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM' && targetKey !== 'ALL_WAGE_SALARY_VALID_FROM') {
                             newRow[targetKey] = row[header];
                         }
                     });
 
                     // Map rates after groups are processed
-                    Object.keys(row).forEach(header => {
+                    mappedHeaders.forEach(header => {
                         const targetKey = mapping.get(header);
                         if (targetKey === 'ALL_EMPLOYEE_GROUPS_RATES') {
                             const val = String(row[header] || '');
-                            const rates = val.split(/[,;]/).map(r => r.trim()).filter(Boolean);
-                            if (rates.length === 1 && groupOrderForRates.length > 0) {
+                            const rates = val.split(/[,;]/).map(r => r.trim()); // Do not filter out blank rates
+                            if (rates.length === 1 && rates[0] !== "" && groupOrderForRates.length > 0) {
                                 const rate = rates[0];
                                 groupOrderForRates.forEach(groupName => {
                                     newRow[`UPDATE - Group Rate - ${groupName}`] = rate;
                                 });
                             } else {
                                 groupOrderForRates.forEach((groupName, i) => {
-                                    if (rates[i] && rates[i] !== "") {
+                                    if (rates[i] !== undefined && rates[i] !== "") {
                                         newRow[`UPDATE - Group Rate - ${groupName}`] = rates[i];
+                                    } else {
+                                        // Explicitly blank rate in ALL_EMPLOYEE_GROUPS_RATES: clear the fallback "x"
+                                        delete newRow[`UPDATE - Group Rate - ${groupName}`];
                                     }
                                 });
                             }
@@ -5278,6 +5361,10 @@ const App: React.FC = () => {
                             const val = newRow[key];
                             if (val !== undefined && val !== null && String(val).trim() !== '') {
                                 activeGroupsForRates.add(key.replace('UPDATE - Group Rate - ', ''));
+                            } else {
+                                // Important: if it's explicitly blank (e.g. from specific mapping), delete it
+                                // so it doesn't leave an empty field mapped for the employee.
+                                delete newRow[key];
                             }
                         }
                     });
@@ -7869,7 +7956,7 @@ const App: React.FC = () => {
         });
         
         if (visibleGroups.size > 1) {
-            options.unshift({ value: 'UPDATE - ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM', label: 'All Employee groups rates valid from' });
+            options.unshift({ value: 'UPDATE - ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM', label: '✨ All Employee groups rates valid from' });
         }
 
         return options;
@@ -8405,6 +8492,16 @@ const App: React.FC = () => {
                                         const wageTypeKey = `UPDATE - Group Wage Type - ${group}`;
                                         return row[rateKey] && String(row[rateKey]).trim() !== '' && String(row[rateKey]).trim() !== 'REMOVE' &&
                                                row[wageTypeKey] && String(row[wageTypeKey]).trim() !== '';
+                                    })
+                                ) : false
+                            }
+                            hasMissingValidFromDates={
+                                rawFileJson ? rawFileJson.some(row => 
+                                    missingWageTypeGroups.some(group => {
+                                        const rateKey = `UPDATE - Group Rate - ${group}`;
+                                        const validFromKey = `UPDATE - Group Valid From - ${group}`;
+                                        return row[rateKey] && String(row[rateKey]).trim() !== '' && String(row[rateKey]).trim() !== 'REMOVE' &&
+                                               (!row[validFromKey] || String(row[validFromKey]).trim() === '');
                                     })
                                 ) : false
                             }
