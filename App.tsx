@@ -7907,6 +7907,28 @@ const App: React.FC = () => {
                         }
                     });
                     newFileJson[rowIndex] = updatedRow;
+                } else if (bulkEditField === 'UPDATE_ALL_DEPARTMENTS') {
+                    const existingCols = Object.keys(row).filter(col => col.startsWith("UPDATE - Department - "));
+                    const updatedRow = { ...newFileJson[rowIndex] };
+                    existingCols.forEach(col => {
+                        if (updatedRow[col] !== bulkEditValue) {
+                            updatedRow[col] = bulkEditValue;
+                            hasChanges = true;
+                            newExplicit.add(col);
+                        }
+                    });
+                    newFileJson[rowIndex] = updatedRow;
+                } else if (bulkEditField === 'UPDATE_ALL_SKILLS') {
+                    const existingCols = Object.keys(row).filter(col => col.startsWith("UPDATE - Skill - "));
+                    const updatedRow = { ...newFileJson[rowIndex] };
+                    existingCols.forEach(col => {
+                        if (updatedRow[col] !== bulkEditValue) {
+                            updatedRow[col] = bulkEditValue;
+                            hasChanges = true;
+                            newExplicit.add(col);
+                        }
+                    });
+                    newFileJson[rowIndex] = updatedRow;
                 } else if (bulkEditField === 'UPDATE - ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM') {
                     const visibleGroups = new Set<string>();
                     Array.from(getUpdateColumns).forEach(col => {
@@ -7943,8 +7965,17 @@ const App: React.FC = () => {
     const changeValueForOptions = useMemo(() => {
         const options = Array.from(getUpdateColumns).map((col: string) => ({ value: col, label: col.replace("UPDATE - ", "") }));
         const hasDepartmentColumn = Array.from(getUpdateColumns).some(col => col.startsWith('UPDATE - Department - '));
+        const hasSkillColumn = Array.from(getUpdateColumns).some(col => col.startsWith('UPDATE - Skill - '));
+
         if (definitions && definitions.departments.length > 0 && hasDepartmentColumn) {
             options.unshift({ value: 'PRIMARY_DEPARTMENT', label: 'Primary Department' });
+        }
+        
+        if (hasSkillColumn) {
+            options.unshift({ value: 'UPDATE_ALL_SKILLS', label: '✨ All Skills' });
+        }
+        if (hasDepartmentColumn) {
+            options.unshift({ value: 'UPDATE_ALL_DEPARTMENTS', label: '✨ All Departments' });
         }
 
         const visibleGroups = new Set<string>();
@@ -7967,6 +7998,19 @@ const App: React.FC = () => {
             return [
                 { value: 'REMOVE_PRIMARY', label: '-- Remove Primary Department --' },
                 ...definitions.departments.map(d => ({ value: d.name, label: d.name }))
+            ];
+        }
+        if (bulkEditField === 'UPDATE_ALL_DEPARTMENTS') {
+            return [
+                { value: 'x', label: 'x' },
+                { value: 'xx', label: 'xx' },
+                { value: 'REMOVE', label: 'REMOVE' }
+            ];
+        }
+        if (bulkEditField === 'UPDATE_ALL_SKILLS') {
+            return [
+                { value: 'X', label: 'X' },
+                { value: 'REMOVE', label: 'REMOVE' }
             ];
         }
         const fieldConfig = bulkEditField ? getFieldConfig(bulkEditField.replace("UPDATE - ", ""), definitions) : null;
