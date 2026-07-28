@@ -4976,6 +4976,7 @@ const App: React.FC = () => {
 
     const handleIdentityMethodSelection = (method: 'NAME' | 'ID', config?: any) => {
         setIsLoading(true);
+        setShowLoadingBar(true);
         setLoadingText("Identifying employees...");
         
         setTimeout(() => {
@@ -5072,18 +5073,25 @@ const App: React.FC = () => {
 
             setSelectedIdentityColumns(usedCols);
             setInitialAutoMapping(autoMap);
-            setIsLoading(false);
             setCurrentStep('map_employees');
+            setTimeout(() => {
+                setIsLoading(false);
+                setShowLoadingBar(false);
+            }, 100);
         }, 50);
     };
 
     const handleEmployeeMappingComplete = (mapping: Map<number, number>) => {
         setIsLoading(true);
+        setShowLoadingBar(true);
         setLoadingText("Preparing field mappings...");
         setTimeout(() => {
             setEmployeeMapping(mapping);
-            setIsLoading(false);
             setCurrentStep('map_fields');
+            setTimeout(() => {
+                setIsLoading(false);
+                setShowLoadingBar(false);
+            }, 100);
         }, 50);
     };
 
@@ -5258,6 +5266,7 @@ const App: React.FC = () => {
     const handleFieldMappingComplete = (mapping: Map<string, string>) => {
         setFieldMapping(mapping);
         setIsLoading(true);
+        setShowLoadingBar(true);
         setLoadingText("Applying mappings...");
 
         setTimeout(() => {
@@ -5518,11 +5527,15 @@ const App: React.FC = () => {
         if (ambiguities.length > 0) {
             setAmbiguousDates(ambiguities);
             setCurrentStep('resolve_dates');
+            setTimeout(() => {
+                setIsLoading(false);
+                setShowLoadingBar(false);
+            }, 100);
         } else {
+            setIsLoading(false);
+            setShowLoadingBar(false);
             processRows(json, [], isUSFormat, true, true); 
         }
-        
-        setIsLoading(false);
     };
 
     const validateData = (rows: any[]): ValidationError[] => {
@@ -7908,7 +7921,7 @@ const App: React.FC = () => {
                     });
                     newFileJson[rowIndex] = updatedRow;
                 } else if (bulkEditField === 'UPDATE_ALL_DEPARTMENTS') {
-                    const existingCols = Object.keys(row).filter(col => col.startsWith("UPDATE - Department - "));
+                    const existingCols = Array.from(getUpdateColumns).filter((col: string) => col.startsWith("UPDATE - Department - "));
                     const updatedRow = { ...newFileJson[rowIndex] };
                     existingCols.forEach(col => {
                         if (updatedRow[col] !== bulkEditValue) {
@@ -7919,7 +7932,7 @@ const App: React.FC = () => {
                     });
                     newFileJson[rowIndex] = updatedRow;
                 } else if (bulkEditField === 'UPDATE_ALL_SKILLS') {
-                    const existingCols = Object.keys(row).filter(col => col.startsWith("UPDATE - Skill - "));
+                    const existingCols = Array.from(getUpdateColumns).filter((col: string) => col.startsWith("UPDATE - Skill - "));
                     const updatedRow = { ...newFileJson[rowIndex] };
                     existingCols.forEach(col => {
                         if (updatedRow[col] !== bulkEditValue) {
