@@ -57,6 +57,7 @@ export interface UpdateWageRatePayload {
     employeeIds: number[];
     validFrom?: string;
     salaryCode?: string;
+    overwriteSalaries?: boolean;
 }
 
 export interface UpdateSalaryPayload {
@@ -111,9 +112,19 @@ export interface EmployeeUpdateReview {
     };
 }
 
+export interface DefaultGroupRate {
+    employeeGroupId: number;
+    defaultWageType: 'HourlyRate' | 'ShiftRate';
+    hourlyRate: number;
+    shiftRate: number;
+    salaryCode: string | null;
+    salaryCode2: string | null;
+}
+
 export interface DefinitionCollection {
     departments: Department[];
     employeeGroups: EmployeeGroup[];
+    defaultGroupRates: DefaultGroupRate[];
     employeeTypes: EmployeeType[];
     contractRules: ContractRule[];
     salaryTypes: SalaryType[];

@@ -333,6 +333,8 @@ const calculateSimilarity = (s1: string, s2: string): number => {
     // Check known synonyms mapped to typical Field keys
     const SYNONYM_GROUPS = [
         ['all_employee_groups', 'all employee groups', 'role', 'rolle', 'befattning', 'stilling', 'position', 'roles'],
+        ['update - employee group list (assign default rate)', 'employee group list', 'assign default rate', 'groups list', 'group list'],
+        ['update - employee group list - valid from', 'employee group list valid from', 'assign default rate valid from', 'groups list valid from', 'group list valid from', 'role valid from'],
         ['update - mobile', 'mobile', 'cellphone', 'mobil', 'mobiltelefon', 'handy', 'telefon', 'phone', 'cell phone'],
         ['update - jobtitle', 'jobtitle', 'job title', 'jobtitel'],
         ['all_departments', 'all departments', 'department', 'segment', 'afdeling', 'avdelning', 'avdeling', 'abteilung', 'dept', 'departments'],
@@ -3317,6 +3319,10 @@ const getFieldConfig = (colName: string, defs: DefinitionCollection | null): { t
     // Departments
     if (lowerName.startsWith("department - ")) return { type: "Dropdown", description: `Department Membership`, guidance: `x = member, xx = primary. Enter REMOVE to unassign.`, options: ["x", "xx", "REMOVE"] };
     
+    // Employee Group List
+    if (lowerName === "employee group list (assign default rate)") return { type: "Text", description: `Employee Groups List`, guidance: `List employee group names separated by comma or semicolon. Groups will be added to the employee.` };
+    if (lowerName === "employee group list - valid from") return { type: "Date", description: `Employee Groups List - Valid from`, guidance: `Date when the default rate should be applied from. Defaults to today if not provided.` };
+    
     // Salaries
     if (lowerName === "fixed salary - period") return { type: "Dropdown", description: "Salary Period", guidance: `Options: Monthly, Fortnightly, Weekly, Annual, FourWeekly. Remember to fill out the other required fields when updating Fixed Salary: Amount and Expected working hours.`, options: ["Monthly", "Fortnightly", "Weekly", "Annual", "FourWeekly"] };
     if (lowerName.includes("expected working hours")) return { type: "Numeric", description: "Salary Hours", guidance: "e.g., 160 for monthly, 37.5 or 37,5 for weekly. Both . and , accepted as decimal separator. Remember to fill out the other required fields when updating Fixed Salary: Period and Amount." };
@@ -4961,6 +4967,8 @@ const App: React.FC = () => {
 
         // Groups (Generic for custom mapping is tricky, stick to simple ones first or list them all)
         targets.push({ key: 'ALL_EMPLOYEE_GROUPS', label: '✨ All Employee groups (split by comma/semicolon)' });
+        add('Employee group list (assign default rate)');
+        add('Employee group list - Valid from');
         targets.push({ key: 'ALL_EMPLOYEE_GROUPS_RATES', label: '✨ All Employee groups rates (split by comma/semicolon)' });
         targets.push({ key: 'ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM', label: '✨ All Employee groups rates valid from' });
         targets.push({ key: 'ALL_WAGE_SALARY_VALID_FROM', label: '✨ All Wage and Salaries valid from' });
@@ -5711,6 +5719,26 @@ const App: React.FC = () => {
                     }
                 }
 
+                // Employee Group List
+                else if (lowerHeader === 'employee group list (assign default rate)') {
+                    const groupNames = String(rawVal).split(/[,;]/).map(d => d.trim()).filter(Boolean);
+                    const invalidGroups = groupNames.filter(gName => !definitions!.employeeGroups.some(g => g.name.trim().toLowerCase() === gName.toLowerCase()));
+                    if (invalidGroups.length > 0) {
+                        errors.push({
+                            rawRowIndex: rowIndex,
+                            fullKey: key,
+                            row: rowNum,
+                            employeeName: empName,
+                            field: 'Employee Group List',
+                            value: invalidGroups.join(', '),
+                            allowed: definitions!.employeeGroups.map(g => g.name)
+                        });
+                    }
+                }
+                else if (lowerHeader === 'employee group list - valid from') {
+                    // It's a date field, let's just make sure it's not empty, date validation happens elsewhere
+                }
+                
                 // 5. Departments (x or xx)
                 else if (lowerHeader.startsWith('department -')) {
                     if (lowerVal !== 'x' && lowerVal !== 'xx' && lowerVal !== 'remove') {
@@ -6185,7 +6213,8 @@ const App: React.FC = () => {
                             rate: rateVal,
                             employeeIds: [empId],
                             validFrom: validFrom,
-                            salaryCode: salaryCode
+                            salaryCode: salaryCode,
+                            overwriteSalaries: true
                         });
                         (review.payloads.groupRates[review.payloads.groupRates.length - 1] as any).groupId = g.id;
 
@@ -6360,6 +6389,51 @@ const App: React.FC = () => {
                          (review.payloads.groups as any)[groupId] = action;
                          review.changes.push(`Group: ${groupName} (${action})`);
                      }
+                }
+                else if (lowerHeader === 'employee group list (assign default rate)') {
+                    const groupNames = String(rawVal).split(/[,;]/).map(d => d.trim()).filter(Boolean);
+                    if (groupNames.length > 0) {
+                        if (!review.payloads.groups) review.payloads.groups = { employeeGroups: [] };
+                        
+                        // Extract valid from date if it exists
+                        const validFromKey = Object.keys(row).find(k => k.trim().toLowerCase() === 'update - employee group list - valid from');
+                        let validFrom = getTodayYYYYMMDD();
+                        if (validFromKey) {
+                            const rawDate = row[validFromKey];
+                            if (rawDate) {
+                                const parsedDate = parseAndLogDate(rawDate, 'Employee Group List - Valid From', validFromKey);
+                                if (parsedDate) validFrom = parsedDate;
+                            }
+                        }
+
+                        groupNames.forEach(groupName => {
+                            const groupId = groupMap.get(groupName.toLowerCase());
+                            if (groupId) {
+                                (review.payloads.groups as any)[groupId] = 'add';
+                                review.changes.push(`Group: ${groupName} (add)`);
+                                
+                                // Lookup default rate
+                                const defaultRate = definitions?.defaultGroupRates?.find(d => d.employeeGroupId === groupId);
+                                if (defaultRate) {
+                                    if (!review.payloads.groupRates) review.payloads.groupRates = [];
+                                    const wageType = defaultRate.defaultWageType;
+                                    const rateVal = wageType === 'HourlyRate' ? defaultRate.hourlyRate : defaultRate.shiftRate;
+                                    const salaryCode = defaultRate.salaryCode || "";
+                                    
+                                    review.payloads.groupRates.push({
+                                        wageType: wageType,
+                                        rate: rateVal,
+                                        employeeIds: [empId],
+                                        validFrom: validFrom,
+                                        salaryCode: salaryCode,
+                                        overwriteSalaries: true
+                                    });
+                                    (review.payloads.groupRates[review.payloads.groupRates.length - 1] as any).groupId = groupId;
+                                    review.changes.push(`Default Rate: ${groupName} -> ${rateVal} (${wageType})`);
+                                }
+                            }
+                        });
+                    }
                 }
             });
 
@@ -7476,7 +7550,7 @@ const App: React.FC = () => {
                         const gName = parts.slice(1).join(" - ").trim();
                         if (!definitions.employeeGroups.some(g => g.name.trim().toLowerCase() === gName)) isMissingInPortal = true;
                     }
-                } else if (!name.startsWith("fixed salary") && !name.startsWith("group rate - ") && !name.startsWith("group wage type - ") && !name.startsWith("group valid from - ") && !name.startsWith("group salary code - ") && !["salary identifier (payroll id)", "email", "birth date", "gender", "tax id", "street 1", "street 2", "zip", "city", "country code", "mobile", "start/hired date", "job title", "jobtitle", "employee type", "system bank reg", "system bank account nr", "contract rule", "assign supervisor", "is supervisor", "is supervisor (x)"].includes(name)) {
+                } else if (!name.startsWith("fixed salary") && !name.startsWith("group rate - ") && !name.startsWith("group wage type - ") && !name.startsWith("group valid from - ") && !name.startsWith("group salary code - ") && !["employee group list (assign default rate)", "employee group list - valid from", "salary identifier (payroll id)", "email", "birth date", "gender", "tax id", "street 1", "street 2", "zip", "city", "country code", "mobile", "start/hired date", "job title", "jobtitle", "employee type", "system bank reg", "system bank account nr", "contract rule", "assign supervisor", "is supervisor", "is supervisor (x)"].includes(name)) {
                     if (!definitions.customFields.some(f => f.description.trim().toLowerCase() === name)) isMissingInPortal = true;
                 }
             }

@@ -317,7 +317,7 @@ export async function fetchFieldDefinitions() {
 }
 
 export async function fetchAllDefinitions(): Promise<DefinitionCollection> {
-    const [departments, employeeGroups, employeeTypes, salaryTypes, skills, supervisors] = await Promise.all([
+    const [departments, employeeGroups, employeeTypes, salaryTypes, skills, supervisors, defaultGroupRates] = await Promise.all([
         fetchPaginatedData('/hr/v1.0/departments'),
         fetchPaginatedData('/hr/v1.0/employeegroups'),
         fetchPaginatedData('/hr/v1.0/employeetypes'),
@@ -327,7 +327,8 @@ export async function fetchAllDefinitions(): Promise<DefinitionCollection> {
             const items = Array.isArray(data) ? data : (data as any).data || [];
             return items.map((s: any) => ({ ...s, id: parseInt(String(s.id || s.skillId), 10) })); 
         }),
-        fetchPaginatedData('/hr/v1.0/employees/supervisors')
+        fetchPaginatedData('/hr/v1.0/employees/supervisors'),
+        fetchWithAuth(`${API_BASE_URL}/pay/v1.0/payrates/employeeGroups/default`).then(res => res.ok ? res.json() : []).then(data => Array.isArray(data) ? data : (data as any).data || []).catch(() => [])
     ]);
     
     // Contract rules (v1)
@@ -338,7 +339,7 @@ export async function fetchAllDefinitions(): Promise<DefinitionCollection> {
 
     const { customFields, availableSystemFields, countryCodes, requiredFields } = await fetchFieldDefinitions();
 
-    return { departments, employeeGroups, employeeTypes, contractRules, salaryTypes, skills, supervisors, customFields, availableSystemFields, countryCodes, requiredFields };
+    return { departments, employeeGroups, defaultGroupRates, employeeTypes, contractRules, salaryTypes, skills, supervisors, customFields, availableSystemFields, countryCodes, requiredFields };
 }
 
 
