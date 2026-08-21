@@ -1593,13 +1593,14 @@ const WageTypeSelection: React.FC<WageTypeSelectionProps> = ({ missingGroups, ha
 interface IdentitySelectorProps {
     isLoading?: boolean;
     headers: string[];
-    onNext: (method: 'NAME' | 'ID', config?: any) => void;
+    onNext: (method: 'NAME' | 'ID' | 'API_ID', config?: any) => void;
     onBack: () => void;
 }
 
 const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, onBack, isLoading }) => {
-    const [method, setMethod] = useState<'NAME' | 'ID'>('ID');
+    const [method, setMethod] = useState<'NAME' | 'ID' | 'API_ID'>('ID');
     const [selectedColumn, setSelectedColumn] = useState('');
+    const [selectedApiIdColumn, setSelectedApiIdColumn] = useState('');
     
     // New State for Name configuration
     const [nameMode, setNameMode] = useState<'AUTO' | 'SINGLE' | 'SPLIT'>('AUTO');
@@ -1610,6 +1611,7 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
 
     const isNextDisabled = () => {
         if (method === 'ID') return !selectedColumn;
+        if (method === 'API_ID') return !selectedApiIdColumn;
         if (method === 'NAME') {
              if (nameMode === 'SINGLE' && !nameCol1) return true;
              if (nameMode === 'SPLIT' && (!nameCol1 || !nameCol2)) return true;
@@ -1620,6 +1622,8 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
     const handleNext = () => {
         if (method === 'ID') {
             onNext('ID', selectedColumn);
+        } else if (method === 'API_ID') {
+            onNext('API_ID', selectedApiIdColumn);
         } else {
             onNext('NAME', { mode: nameMode, col1: nameCol1, col2: nameCol2 });
         }
@@ -1656,6 +1660,36 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
                                         value={selectedColumn} 
                                         onChange={setSelectedColumn} 
                                         placeholder="-- Select ID Column --" 
+                                     />
+                                 </div>
+                             )}
+                         </div>
+                     </div>
+                 </div>
+
+                 <div 
+                    className={`border rounded-lg p-4 cursor-pointer transition-all ${method === 'API_ID' ? 'ring-2 ring-blue-500 bg-blue-50 border-blue-500' : 'border-gray-200 hover:border-gray-300'}`}
+                    onClick={() => setMethod('API_ID')}
+                 >
+                     <div className="flex items-start gap-3">
+                         <div className={`w-5 h-5 mt-1 rounded-full border flex items-center justify-center ${method === 'API_ID' ? 'border-blue-600' : 'border-gray-400'}`}>
+                             {method === 'API_ID' && <div className="w-2.5 h-2.5 bg-blue-600 rounded-full" />}
+                         </div>
+                         <div className="flex-1">
+                             <div className="font-bold flex items-center gap-2">
+                                 <BadgeIdIcon className="w-5 h-5 text-gray-500"/>
+                                 Match by Planday Employee ID (API)
+                             </div>
+                             <p className="text-sm text-gray-500 mt-1">Uses a specific column in your file to match against the Planday API Employee ID.</p>
+                             
+                             {method === 'API_ID' && (
+                                 <div className="mt-4 bg-white p-3 rounded border border-gray-200 animate-fadeIn" onClick={e => e.stopPropagation()}>
+                                     <label className="block text-xs font-bold text-gray-700 mb-1">Select Column containing Planday Employee ID:</label>
+                                     <SearchableSelect 
+                                        options={options} 
+                                        value={selectedApiIdColumn} 
+                                        onChange={setSelectedApiIdColumn} 
+                                        placeholder="-- Select API ID Column --" 
                                      />
                                  </div>
                              )}
@@ -1738,7 +1772,7 @@ interface EmployeeMapperProps {
     rows: any[];
     employees: Employee[];
     initialMapping?: Map<number, number | null>;
-    matchMethod?: 'NAME' | 'ID';
+    matchMethod?: 'NAME' | 'ID' | 'API_ID';
     onComplete: (mapping: Map<number, number>) => void;
     onCancel: () => void;
     onBack: () => void;
@@ -3688,6 +3722,10 @@ const App: React.FC = () => {
     const [detectedUSFormat, setDetectedUSFormat] = useState(false);
     const [duplicateHeadersWarning, setDuplicateHeadersWarning] = useState<string[]>([]);
 
+    const [showDeptActionModal, setShowDeptActionModal] = useState(false);
+    const [pendingDeptMapping, setPendingDeptMapping] = useState<Map<string, string> | null>(null);
+    const [globalDeptAction, setGlobalDeptAction] = useState<string>("x");
+
     // Review step filters
     const [searchReview, setSearchReview] = useState('');
     const [filterDepartment, setFilterDepartment] = useState<number[]>([]);
@@ -3825,9 +3863,12 @@ const App: React.FC = () => {
     const [unmappedJson, setUnmappedJson] = useState<any[]>([]);
     const [employeeMapping, setEmployeeMapping] = useState<Map<number, number>>(new Map());
     const [initialAutoMapping, setInitialAutoMapping] = useState<Map<number, number | null>>(new Map());
-    const [selectedIdentityMethod, setSelectedIdentityMethod] = useState<'NAME' | 'ID'>('NAME');
+    const [selectedIdentityMethod, setSelectedIdentityMethod] = useState<'NAME' | 'ID' | 'API_ID'>('NAME');
     const [selectedIdentityColumns, setSelectedIdentityColumns] = useState<string[]>([]);
     const [fieldMapping, setFieldMapping] = useState<Map<string, string>>(new Map());
+    const [departmentAddRemoveAction, setDepartmentAddRemoveAction] = useState<'x' | 'REMOVE' | null>(null);
+    const [pendingMapping, setPendingMapping] = useState<Map<string, string> | null>(null);
+    const [showDeptActionPrompt, setShowDeptActionPrompt] = useState(false);
     const [missingWageTypeGroups, setMissingWageTypeGroups] = useState<string[]>([]);
 
     const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -4963,6 +5004,7 @@ const App: React.FC = () => {
 
         // Departments
         targets.push({ key: 'ALL_DEPARTMENTS', label: '✨ All Departments (split by comma/semicolon)' });
+        targets.push({ key: 'ALL_DEPARTMENTS_ADD_REMOVE', label: '✨ All Departments - Add/Remove (x or REMOVE)' });
         defs.departments.forEach(d => add(`Department - ${d.name.trim()}`));
 
         // Groups (Generic for custom mapping is tricky, stick to simple ones first or list them all)
@@ -4982,7 +5024,7 @@ const App: React.FC = () => {
         return targets;
     };
 
-    const handleIdentityMethodSelection = (method: 'NAME' | 'ID', config?: any) => {
+    const handleIdentityMethodSelection = (method: 'NAME' | 'ID' | 'API_ID', config?: any) => {
         setIsLoading(true);
         setShowLoadingBar(true);
         setLoadingText("Identifying employees...");
@@ -5065,6 +5107,25 @@ const App: React.FC = () => {
                 allEmployees.forEach(e => {
                     if (e.salaryIdentifier) {
                         idMap.set(String(e.salaryIdentifier).trim().toLowerCase(), e.id);
+                    }
+                });
+                unmappedJson.forEach((row, idx) => {
+                    const val = row[config];
+                    if (val !== undefined && val !== null) {
+                        const cleanVal = String(val).trim().toLowerCase();
+                        const matchedId = idMap.get(cleanVal);
+                        autoMap.set(idx, matchedId || null);
+                    } else {
+                        autoMap.set(idx, null);
+                    }
+                });
+            } else if (method === 'API_ID' && config) {
+                // API ID Matching Logic
+                if (config && !usedCols.includes(config)) usedCols.push(config);
+                const idMap = new Map<string, number>();
+                allEmployees.forEach(e => {
+                    if (e.id) {
+                        idMap.set(String(e.id).trim().toLowerCase(), e.id);
                     }
                 });
                 unmappedJson.forEach((row, idx) => {
@@ -5273,6 +5334,25 @@ const App: React.FC = () => {
 
     const handleFieldMappingComplete = (mapping: Map<string, string>) => {
         setFieldMapping(mapping);
+
+        let hasAllDepts = false;
+        let hasAllDeptsAddRemove = false;
+        for (let k of mapping.values()) {
+            if (k === 'ALL_DEPARTMENTS') hasAllDepts = true;
+            if (k === 'ALL_DEPARTMENTS_ADD_REMOVE') hasAllDeptsAddRemove = true;
+        }
+
+        if (hasAllDepts && !hasAllDeptsAddRemove) {
+            setPendingDeptMapping(mapping);
+            setShowDeptActionModal(true);
+            return;
+        }
+
+        processFieldMappingComplete(mapping, "x");
+    };
+
+    const processFieldMappingComplete = (mapping: Map<string, string>, deptAction: string) => {
+        setGlobalDeptAction(deptAction);
         setIsLoading(true);
         setShowLoadingBar(true);
         setLoadingText("Applying mappings...");
@@ -5305,10 +5385,30 @@ const App: React.FC = () => {
                         if (targetKey === 'ALL_DEPARTMENTS') {
                             const val = String(row[header] || '');
                             const deptNames = val.split(/[,;]/).map(d => d.trim()).filter(Boolean);
+                            
+                            // Find the value from ALL_DEPARTMENTS_ADD_REMOVE if mapped
+                            let actionValue = deptAction || "x"; // default to global or 'x'
+                            
+                            // Find which header maps to ALL_DEPARTMENTS_ADD_REMOVE
+                            let addRemoveHeader = null;
+                            for (let [h, k] of mapping.entries()) {
+                                if (k === 'ALL_DEPARTMENTS_ADD_REMOVE') {
+                                    addRemoveHeader = h;
+                                    break;
+                                }
+                            }
+                            
+                                                        if (addRemoveHeader) {
+                                const rowVal = String(row[addRemoveHeader] || '').trim();
+                                if (rowVal.toLowerCase() === 'x' || rowVal.toUpperCase() === 'REMOVE') {
+                                    actionValue = rowVal;
+                                }
+                            }
+                            
                             deptNames.forEach(deptName => {
                                 const matchingDept = definitions?.departments.find(d => d.name.toLowerCase() === deptName.toLowerCase());
                                 if (matchingDept) {
-                                    newRow[`UPDATE - Department - ${matchingDept.name.trim()}`] = "x";
+                                    newRow[`UPDATE - Department - ${matchingDept.name.trim()}`] = actionValue;
                                 }
                             });
                         } else if (targetKey === 'ALL_EMPLOYEE_GROUPS') {
@@ -5327,7 +5427,7 @@ const App: React.FC = () => {
                     // Map fields - Pass 2: Specific target keys (so they can overwrite the default "x" with "" if blank)
                     mappedHeaders.forEach(header => {
                         const targetKey = mapping.get(header);
-                        if (targetKey && targetKey !== 'IDENTITY_IGNORE' && targetKey !== 'ALL_DEPARTMENTS' && targetKey !== 'ALL_EMPLOYEE_GROUPS' && targetKey !== 'ALL_EMPLOYEE_GROUPS_RATES' && targetKey !== 'ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM' && targetKey !== 'ALL_WAGE_SALARY_VALID_FROM') {
+                        if (targetKey && targetKey !== 'IDENTITY_IGNORE' && targetKey !== 'ALL_DEPARTMENTS' && targetKey !== 'ALL_DEPARTMENTS_ADD_REMOVE' && targetKey !== 'ALL_EMPLOYEE_GROUPS' && targetKey !== 'ALL_EMPLOYEE_GROUPS_RATES' && targetKey !== 'ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM' && targetKey !== 'ALL_WAGE_SALARY_VALID_FROM') {
                             newRow[targetKey] = row[header];
                         }
                     });
@@ -7765,7 +7865,7 @@ const App: React.FC = () => {
         if (fieldKey === "ALL_HR_FIELDS") {
             const targets = generateTargetFields(definitions);
             targets.forEach(t => {
-                if (['ALL_DEPARTMENTS', 'ALL_EMPLOYEE_GROUPS', 'ALL_EMPLOYEE_GROUPS_RATES', 'ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM', 'ALL_WAGE_SALARY_VALID_FROM'].includes(t.key)) return;
+                if (['ALL_DEPARTMENTS', 'ALL_DEPARTMENTS_ADD_REMOVE', 'ALL_EMPLOYEE_GROUPS', 'ALL_EMPLOYEE_GROUPS_RATES', 'ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM', 'ALL_WAGE_SALARY_VALID_FROM'].includes(t.key)) return;
                 
                 if (!t.key.startsWith("UPDATE - Skill - ") &&
                     !t.key.startsWith("UPDATE - Department - ") &&
@@ -7915,7 +8015,7 @@ const App: React.FC = () => {
         const updateColsSet = new Set(getUpdateColumns);
         // Exclude pseudo-mapper keys from the editor dropdown
         const allTargets = generateTargetFields(definitions).filter(f => 
-            !['ALL_DEPARTMENTS', 'ALL_EMPLOYEE_GROUPS', 'ALL_EMPLOYEE_GROUPS_RATES', 'ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM', 'ALL_WAGE_SALARY_VALID_FROM'].includes(f.key)
+            !['ALL_DEPARTMENTS', 'ALL_DEPARTMENTS_ADD_REMOVE', 'ALL_EMPLOYEE_GROUPS', 'ALL_EMPLOYEE_GROUPS_RATES', 'ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM', 'ALL_WAGE_SALARY_VALID_FROM'].includes(f.key)
         );
         const availableTargets = allTargets.filter(f => !updateColsSet.has(f.key));
 
@@ -9344,6 +9444,31 @@ const App: React.FC = () => {
                     )}
 
                 </main>
+                
+                <ConfirmModal
+                    isOpen={showDeptActionPrompt}
+                    onClose={() => setShowDeptActionPrompt(false)}
+                    title="Department Action"
+                    message="You have mapped 'All Departments', but not specified whether to add or remove them. Do you want to Add (x) or Remove these departments?"
+                    confirmText="Add (x)"
+                    cancelText="Cancel"
+                    onConfirm={() => {
+                        setDepartmentAddRemoveAction('x');
+                        setShowDeptActionPrompt(false);
+                        if (pendingMapping) {
+                            processMapping(pendingMapping, 'x');
+                        }
+                    }}
+                    secondaryConfirmAction={() => {
+                        setDepartmentAddRemoveAction('REMOVE');
+                        setShowDeptActionPrompt(false);
+                        if (pendingMapping) {
+                            processMapping(pendingMapping, 'REMOVE');
+                        }
+                    }}
+                    secondaryConfirmText="Remove"
+                />
+
                 <ConfirmModal 
                     isOpen={showConfirmModal}
                     onClose={() => setShowConfirmModal(false)}
@@ -9431,6 +9556,57 @@ const App: React.FC = () => {
                 )}
             </div>
             
+            {/* Department Action Modal */}
+            {showDeptActionModal && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900 bg-opacity-50 backdrop-blur-sm p-4 text-left">
+                    <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 transform transition-all">
+                        <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        </div>
+                        <h3 className="text-xl font-bold text-gray-900 mb-2 text-center">Map 'All Departments'</h3>
+                        <p className="text-gray-600 mb-6 font-medium text-center">You have mapped 'All Departments' but you haven't mapped an 'Add/Remove' action. What would you like to do with the departments listed in this cell?</p>
+                        
+                        <div className="space-y-3 mb-6">
+                            <label className="flex items-start gap-3 p-3 border rounded-lg hover:bg-gray-50 cursor-pointer">
+                                <input type="radio" name="deptAction" value="x" className="mt-1" checked={globalDeptAction === 'x'} onChange={() => setGlobalDeptAction('x')} />
+                                <div>
+                                    <span className="block font-semibold">Add (x)</span>
+                                    <span className="block text-sm text-gray-500">Add the employee to these departments</span>
+                                </div>
+                            </label>
+                            <label className="flex items-start gap-3 p-3 border rounded-lg hover:bg-gray-50 cursor-pointer">
+                                <input type="radio" name="deptAction" value="REMOVE" className="mt-1" checked={globalDeptAction === 'REMOVE'} onChange={() => setGlobalDeptAction('REMOVE')} />
+                                <div>
+                                    <span className="block font-semibold">Remove</span>
+                                    <span className="block text-sm text-gray-500">Remove the employee from these departments</span>
+                                </div>
+                            </label>
+                        </div>
+
+                        <div className="flex justify-end gap-3">
+                            <button 
+                                onClick={() => setShowDeptActionModal(false)}
+                                className="bg-white border border-gray-300 text-gray-700 px-5 py-2.5 rounded-lg font-bold hover:bg-gray-50 transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button 
+                                onClick={() => {
+                                    setShowDeptActionModal(false);
+                                    if (pendingDeptMapping) {
+                                        processFieldMappingComplete(pendingDeptMapping, globalDeptAction);
+                                        setPendingDeptMapping(null);
+                                    }
+                                }}
+                                className="bg-blue-600 text-white px-5 py-2.5 rounded-lg font-bold hover:bg-blue-700 transition-colors"
+                            >
+                                Continue
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <HelpModal 
                 isOpen={showHelpModal} 
                 onClose={() => setShowHelpModal(false)}
