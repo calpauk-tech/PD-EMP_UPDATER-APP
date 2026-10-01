@@ -135,3 +135,14 @@ export interface DefinitionCollection {
     countryCodes?: string[];
     requiredFields?: string[];
 }
+
+export interface DiscrepancyItem {
+    rowIndex: number;
+    rowNumber: number;
+    idValue: string;
+    idField: string;
+    idMethod: 'ID' | 'API_ID';
+    expectedEmployeeId?: number;
+    expectedName: string;
+    uploadedName: string;
+}

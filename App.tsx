@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx-js-style';
-import type { PlandayApiCredentials, DefinitionCollection, EmployeeUpdateReview, UpdateWageRatePayload, UpdateActionResult, FieldDefinition, Employee } from './types';
-import { initializeService, fetchEmployees, fetchAllDefinitions, fetchFieldDefinitions, fetchEmployeeDetails, fetchEmployeeContractRule, fetchEmployeeSalary, fetchEmployeePayRates, updateEmployee, assignContractRule, changeUsername, updateFixedSalary, updateWageRate, resetService, fetchPaginatedData, fetchPortalInfo } from './services/plandayService';
+import type { PlandayApiCredentials, DefinitionCollection, EmployeeUpdateReview, UpdateWageRatePayload, UpdateActionResult, FieldDefinition, Employee, DiscrepancyItem } from './types';
+import { initializeService, fetchEmployees, fetchAllDefinitions, fetchFieldDefinitions, fetchEmployeeDetails, fetchEmployeeContractRule, fetchEmployeeSalary, fetchEmployeePayRates, updateEmployee, assignContractRule, changeUsername, updateFixedSalary, updateWageRate, resetService, revokeToken, fetchPaginatedData, fetchPortalInfo } from './services/plandayService';
 
 // --- Utility Functions ---
 const formatDateToYYYYMMDD = (date: string | Date | undefined | null): string => {
@@ -325,29 +325,181 @@ const ConfirmModal: React.FC<{
     );
 };
 
+const ReviewDiscrepanciesModal: React.FC<{
+    isOpen: boolean;
+    discrepancies: DiscrepancyItem[];
+    onCancelUploadNew: () => void;
+    onIgnoreAndProceed: () => void;
+}> = ({ isOpen, discrepancies, onCancelUploadNew, onIgnoreAndProceed }) => {
+    const [search, setSearch] = useState('');
+
+    if (!isOpen || discrepancies.length === 0) return null;
+
+    const filtered = discrepancies.filter(d => {
+        if (!search) return true;
+        const q = search.toLowerCase();
+        return (
+            `row ${d.rowNumber}`.includes(q) ||
+            d.idValue.toLowerCase().includes(q) ||
+            d.expectedName.toLowerCase().includes(q) ||
+            d.uploadedName.toLowerCase().includes(q)
+        );
+    });
+
+    return (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-gray-900 bg-opacity-60 backdrop-blur-sm p-4 overflow-y-auto transition-opacity animate-fadeIn">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-red-200">
+                {/* Modal Header */}
+                <div className="p-6 border-b border-gray-100 bg-red-50 flex items-start justify-between gap-4">
+                    <div className="flex items-start gap-4">
+                        <div className="w-12 h-12 rounded-xl bg-red-100 text-red-600 flex items-center justify-center flex-shrink-0 shadow-sm">
+                            <AlertIcon className="w-7 h-7" />
+                        </div>
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <h3 className="text-xl font-bold text-gray-900">Review Discrepancies</h3>
+                                <span className="bg-red-200 text-red-800 text-xs font-bold px-2.5 py-0.5 rounded-full">
+                                    {discrepancies.length} Mismatch{discrepancies.length === 1 ? '' : 'es'}
+                                </span>
+                            </div>
+                            <p className="text-sm text-red-800 mt-1">
+                                Employee ID mismatch detected in your uploaded file.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Explanation Alert Box */}
+                <div className="px-6 pt-4">
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-900 leading-relaxed">
+                        <strong className="font-semibold block mb-0.5">⚠️ Why did this happen?</strong>
+                        The employee ID on the rows below belongs to a different employee than the name in your sheet. 
+                        This commonly occurs when rows in a spreadsheet accidentally shifted (e.g. deleting or inserting a cell in one column).
+                    </div>
+                </div>
+
+                {/* Search Bar if > 4 items */}
+                {discrepancies.length > 4 && (
+                    <div className="px-6 pt-3">
+                        <input
+                            type="text"
+                            placeholder="Filter mismatched rows..."
+                            value={search}
+                            onChange={e => setSearch(e.target.value)}
+                            className="w-full text-xs px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                        />
+                    </div>
+                )}
+
+                {/* Discrepancies List */}
+                <div className="p-6 overflow-y-auto flex-1 space-y-3" style={{ maxHeight: 'calc(90vh - 280px)' }}>
+                    {filtered.map(d => (
+                        <div key={d.rowIndex} className="border border-red-200 bg-red-50/50 rounded-xl p-4 transition-all hover:bg-red-50/80">
+                            {/* Summary Text matching requested specification */}
+                            <div className="text-sm font-semibold text-gray-900 mb-2.5 flex items-start gap-2">
+                                <span className="bg-gray-800 text-white text-xs px-2 py-0.5 rounded font-mono font-bold flex-shrink-0">
+                                    Row {d.rowNumber}
+                                </span>
+                                <span className="leading-snug">
+                                    Row {d.rowNumber}: ID <code className="bg-white border px-1.5 py-0.5 rounded font-bold text-gray-800 font-mono">{d.idValue}</code> belongs to <strong className="text-green-700 font-bold">{d.expectedName}</strong>, but your file says <strong className="text-red-700 font-bold underline decoration-red-400">{d.uploadedName}</strong>
+                                </span>
+                            </div>
+
+                            {/* Comparison breakdown */}
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs pt-2 border-t border-red-100">
+                                <div className="bg-white p-2 rounded border border-gray-200">
+                                    <span className="text-gray-500 block text-[10px] font-medium uppercase tracking-wider">{d.idField}</span>
+                                    <span className="font-mono font-semibold text-gray-800">{d.idValue}</span>
+                                </div>
+                                <div className="bg-white p-2 rounded border border-green-200">
+                                    <span className="text-green-700 block text-[10px] font-medium uppercase tracking-wider">Expected in Planday</span>
+                                    <span className="font-semibold text-green-800">{d.expectedName}</span>
+                                </div>
+                                <div className="bg-white p-2 rounded border border-red-200">
+                                    <span className="text-red-700 block text-[10px] font-medium uppercase tracking-wider">Uploaded in File</span>
+                                    <span className="font-semibold text-red-800">{d.uploadedName}</span>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                    {filtered.length === 0 && (
+                        <p className="text-center text-xs text-gray-400 py-4">No matching discrepancies found.</p>
+                    )}
+                </div>
+
+                {/* Modal Footer with Two Required Choices */}
+                <div className="p-4 px-6 border-t border-gray-100 bg-gray-50 flex flex-col sm:flex-row justify-between items-center gap-3">
+                    <p className="text-xs text-gray-500 text-center sm:text-left">
+                        Please choose how you wish to resolve this before continuing.
+                    </p>
+                    <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+                        {/* Button 2 (Secondary/Warning) */}
+                        <button
+                            type="button"
+                            onClick={onIgnoreAndProceed}
+                            className="w-full sm:w-auto px-4 py-2.5 rounded-lg text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 font-bold text-sm transition-colors focus:ring-2 focus:ring-amber-300 focus:outline-none"
+                            title="Force import using the provided IDs as the source of truth"
+                        >
+                            Ignore Warnings & Proceed
+                        </button>
+                        {/* Button 1 (Primary) */}
+                        <button
+                            type="button"
+                            onClick={onCancelUploadNew}
+                            className="w-full sm:w-auto px-5 py-2.5 rounded-lg text-white bg-blue-600 hover:bg-blue-700 font-bold text-sm transition-colors focus:ring-2 focus:ring-blue-300 focus:outline-none shadow-sm flex items-center justify-center gap-1.5"
+                        >
+                            <span>&larr;</span> Cancel & Upload New File
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const normalizeMultilingualText = (s: string): string => {
+    if (!s) return "";
+    return s
+        .normalize('NFKC')
+        .toLowerCase()
+        // Unicode combining marks decomposition (strips accents from Greek tonos, Latin diacritics, etc.)
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        // Russian / Cyrillic ё -> е
+        .replace(/ё/gu, 'е')
+        // Arabic tashkeel / harakat diacritics & tatweel
+        .replace(/[\u0640\u064B-\u065F\u0670]/gu, '')
+        // Arabic letter normalizations: alef variants -> ا
+        .replace(/[أإآٱ]/gu, 'ا')
+        // Arabic taa marbuta -> ه
+        .replace(/ة/gu, 'ه')
+        // Arabic alef maksura -> ي
+        .replace(/ى/gu, 'ي')
+        .trim();
+};
+
 const calculateSimilarity = (s1: string, s2: string): number => {
-    const normalize = (s: string) => s.toLowerCase().trim().replace(/[^a-z0-9 ]/g, '');
+    const normalize = (s: string) => normalizeMultilingualText(s).replace(/[^\p{L}\p{N} ]/gu, '');
     const a = normalize(s1);
     const b = normalize(s2);
     
-    // Check known synonyms mapped to typical Field keys
+    // Check known synonyms mapped to typical Field keys (multilingual: English, Danish, Swedish, German, Greek, Russian, Arabic)
     const SYNONYM_GROUPS = [
-        ['all_employee_groups', 'all employee groups', 'role', 'rolle', 'befattning', 'stilling', 'position', 'roles'],
-        ['update - employee group list (assign default rate)', 'employee group list', 'assign default rate', 'groups list', 'group list'],
-        ['update - employee group list - valid from', 'employee group list valid from', 'assign default rate valid from', 'groups list valid from', 'group list valid from', 'role valid from'],
-        ['update - mobile', 'mobile', 'cellphone', 'mobil', 'mobiltelefon', 'handy', 'telefon', 'phone', 'cell phone'],
-        ['update - jobtitle', 'jobtitle', 'job title', 'jobtitel'],
-        ['all_departments', 'all departments', 'department', 'segment', 'afdeling', 'avdelning', 'avdeling', 'abteilung', 'dept', 'departments'],
-        ['first name', 'firstname', 'fornavn', 'förnamn', 'vorname'],
-        ['last name', 'lastname', 'efternavn', 'efternamn', 'etternavn', 'nachname'],
-        ['name', 'navn', 'namn', 'fullname', 'fulde navn']
+        ['all_employee_groups', 'all employee groups', 'employee group list', 'assign default rate', 'groups list', 'group list', 'role', 'rolle', 'befattning', 'stilling', 'position', 'roles', 'ομάδες', 'ομάδα εργαζομένων', 'ρόλος', 'группа сотрудников', 'группы', 'роли', 'مجموعة الموظفين', 'مجموعات الموظفين', 'مجموعة'],
+        ['all_employee_groups_rates_valid_from', 'all employee groups rates valid from', 'employee group list valid from', 'assign default rate valid from', 'groups list valid from', 'group list valid from', 'role valid from', 'groups valid from', 'group valid from', 'rates valid from', 'rate valid from'],
+        ['update - mobile', 'mobile', 'cellphone', 'mobil', 'mobiltelefon', 'handy', 'telefon', 'phone', 'cell phone', 'κινητό', 'κινητό τηλέφωνο', 'τηλέφωνο', 'мобильный', 'телефон', 'هاتف', 'موبايل', 'جوال', 'رقم الهاتف', 'رقم الجوال'],
+        ['update - jobtitle', 'jobtitle', 'job title', 'jobtitel', 'τίτλος εργασίας', 'θέση', 'должность', 'профессия', 'المسمى الوظيفي', 'الوظيفة', 'المنصب'],
+        ['all_departments', 'all departments', 'department', 'segment', 'afdeling', 'avdelning', 'avdeling', 'abteilung', 'dept', 'departments', 'τμήμα', 'τομέας', 'τμήματα', 'отдел', 'отделы', 'департамент', 'подразделение', 'قسم', 'القسم', 'أقسام', 'إدارة', 'الادارة'],
+        ['first name', 'firstname', 'fornavn', 'förnamn', 'vorname', 'όνομα', 'πρώτο όνομα', 'μικρό όνομα', 'имя', 'الاسم الأول', 'الاسم الاول', 'اسم الشخص', 'prénom', 'prenom', 'nombre', 'nome', 'imię'],
+        ['last name', 'lastname', 'efternavn', 'efternamn', 'etternavn', 'nachname', 'επώνυμο', 'επίθετο', 'фамилия', 'اسم العائلة', 'اسم العائله', 'الكنية', 'الكنيه', 'الشهرة', 'الشهره', 'nom', 'apellido', 'cognome', 'nazwisko'],
+        ['name', 'navn', 'namn', 'fullname', 'fulde navn', 'πλήρες όνομα', 'ονοματεπώνυμο', 'фио', 'полное имя', 'сотрудник', 'الاسم', 'الاسم الكامل', 'اسم الموظف']
     ];
 
     const aNoSpace = a.replace(/ /g, '');
     const bNoSpace = b.replace(/ /g, '');
 
     for (const group of SYNONYM_GROUPS) {
-        const normGroup = group.map(t => t.replace(/[^a-z0-9]/g, ''));
+        const normGroup = group.map(t => normalizeMultilingualText(t).replace(/[^\p{L}\p{N}]/gu, ''));
         const aSyn = normGroup.some(t => aNoSpace.includes(t) || t.includes(aNoSpace));
         const bSyn = normGroup.some(t => bNoSpace.includes(t) || t.includes(bNoSpace));
         if (aSyn && bSyn) {
@@ -359,14 +511,16 @@ const calculateSimilarity = (s1: string, s2: string): number => {
     if (a.length === 0 || b.length === 0) return 0;
 
     const getLevenshteinDistance = (str1: string, str2: string) => {
-        const m = str1.length;
-        const n = str2.length;
+        const arr1 = Array.from(str1);
+        const arr2 = Array.from(str2);
+        const m = arr1.length;
+        const n = arr2.length;
         const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
         for (let i = 0; i <= m; i++) dp[i][0] = i;
         for (let j = 0; j <= n; j++) dp[0][j] = j;
         for (let i = 1; i <= m; i++) {
             for (let j = 1; j <= n; j++) {
-                const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
+                const cost = arr1[i - 1] === arr2[j - 1] ? 0 : 1;
                 dp[i][j] = Math.min(
                     dp[i - 1][j] + 1,
                     dp[i][j - 1] + 1,
@@ -378,7 +532,7 @@ const calculateSimilarity = (s1: string, s2: string): number => {
     };
 
     const getSim = (str1: string, str2: string) => {
-        const maxLen = Math.max(str1.length, str2.length);
+        const maxLen = Math.max(Array.from(str1).length, Array.from(str2).length);
         if (maxLen === 0) return 1;
         const dist = getLevenshteinDistance(str1, str2);
         const sim = 1 - (dist / maxLen);
@@ -417,13 +571,13 @@ const extractEmployeeName = (row: any): string => {
     let first = "";
     let last = "";
     let full = "";
-    const namePattern = /^(name|navn|namn|fullname|fulde(\s*)navn)$/i;
-    const firstPattern = /^(first(\s*)name|firstname|fornavn|förnamn|vorname)$/i;
-    const lastPattern = /^(last(\s*)name|lastname|efternavn|efternamn|etternavn|nachname)$/i;
+    const namePattern = /^(name|navn|namn|fullname|fulde(\s*)navn|πλήρες(\s*)όνομα|ονοματεπώνυμο|фио|полное(\s*)имя|сотрудник|الاسم|الاسم(\s*)الكامل|اسم(\s*)الموظف)$/i;
+    const firstPattern = /^(first(\s*)name|firstname|fornavn|förnamn|vorname|όνομα|πρώτο(\s*)όνομα|μικρό(\s*)όνομα|имя|الاسم(\s*)الأول|الاسم(\s*)الاول|اسم(\s*)الشخص|prénom|prenom|nombre|nome|imię)$/i;
+    const lastPattern = /^(last(\s*)name|lastname|efternavn|efternamn|etternavn|nachname|επώνυμο|επωνυμο|επίθετο|επιθετο|фамилия|اسم(\s*)العائلة|اسم(\s*)العائله|الكنية|الكنيه|الشهرة|الشهره|nom|apellido|cognome|nazwisko)$/i;
 
     for (const key of Object.keys(row)) {
         if (!row[key]) continue;
-        const cleanKey = key.trim();
+        const cleanKey = key.trim().normalize('NFKC');
         if (firstPattern.test(cleanKey)) first = String(row[key]);
         else if (lastPattern.test(cleanKey)) last = String(row[key]);
         else if (namePattern.test(cleanKey)) full = String(row[key]);
@@ -433,6 +587,66 @@ const extractEmployeeName = (row: any): string => {
     if (combined && combined !== "null") return combined;
     if (full && full !== "null") return full.trim();
     return "";
+};
+
+const isLooseFuzzyNameMatch = (expected: string, uploaded: string): boolean => {
+    if (!expected && !uploaded) return true;
+    if (!expected || !uploaded) return false;
+
+    // 1. Basic normalization (lowercase, unicode decomposition, diacritics stripped, trim)
+    const norm = (s: string) => normalizeMultilingualText(s).replace(/[^\p{L}\p{N} ]/gu, '').replace(/\s+/g, ' ').trim();
+    const a = norm(expected);
+    const b = norm(uploaded);
+
+    if (a === b) return true;
+    if (a.replace(/ /g, '') === b.replace(/ /g, '')) return true;
+
+    // 2. Token sets (handles reordered names e.g. "Simpson, Jack" vs "Jack Simpson")
+    const tokensA = a.split(' ').filter(Boolean);
+    const tokensB = b.split(' ').filter(Boolean);
+
+    if (tokensA.slice().sort().join(' ') === tokensB.slice().sort().join(' ')) {
+        return true;
+    }
+
+    // 3. First and last name matching (handles middle names present or omitted)
+    if (tokensA.length >= 2 && tokensB.length >= 2) {
+        const firstA = tokensA[0];
+        const lastA = tokensA[tokensA.length - 1];
+        const firstB = tokensB[0];
+        const lastB = tokensB[tokensB.length - 1];
+
+        if (firstA === firstB && lastA === lastB) return true;
+        if (firstA === lastB && lastA === firstB) return true;
+    }
+
+    // 4. Token subset check (e.g. middle name included in one string but not the other)
+    if (tokensA.length > 0 && tokensB.length > 0) {
+        const setA = new Set(tokensA);
+        const setB = new Set(tokensB);
+        const [smaller, larger] = tokensA.length < tokensB.length ? [tokensA, setB] : [tokensB, setA];
+        if (smaller.length >= 2 && smaller.every(t => larger.has(t))) {
+            return true;
+        }
+    }
+
+    // 5. Fuzzy text similarity (typos)
+    const sim = calculateSimilarity(a, b);
+    if (sim >= 0.80) return true;
+
+    // Token-by-token fuzzy match if same number of tokens
+    if (tokensA.length === tokensB.length && tokensA.length >= 2) {
+        let allTokensFuzzy = true;
+        for (let i = 0; i < tokensA.length; i++) {
+            if (calculateSimilarity(tokensA[i], tokensB[i]) < 0.75) {
+                allTokensFuzzy = false;
+                break;
+            }
+        }
+        if (allTokensFuzzy) return true;
+    }
+
+    return false;
 };
 
 interface Option {
@@ -565,15 +779,18 @@ const SearchableSelect: React.FC<{
     const filteredOptions = useMemo(() => {
         let result = options;
         if (search) {
-            const lower = search.toLowerCase();
-            result = options.filter(o => o.label.toLowerCase().includes(lower));
+            const normSearch = normalizeMultilingualText(search);
+            result = options.filter(o => {
+                const normLabel = normalizeMultilingualText(o.label || "");
+                return normLabel.includes(normSearch);
+            });
         }
         return result;
     }, [options, search]);
 
     if (disabled) {
         return (
-            <div className="w-full p-2 border border-gray-200 rounded bg-gray-100 text-gray-500 text-sm truncate select-none italic">
+            <div dir="auto" className="w-full p-2 border border-gray-200 rounded bg-gray-100 text-gray-500 text-sm truncate select-none italic">
                 {currentLabel}
             </div>
         );
@@ -589,6 +806,7 @@ const SearchableSelect: React.FC<{
                 <input 
                     ref={inputRef}
                     type="text" 
+                    dir="auto"
                     className="w-full p-1.5 px-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-gray-900"
                     placeholder="Type to search..."
                     value={search}
@@ -626,7 +844,7 @@ const SearchableSelect: React.FC<{
                                     setIsOpen(false); 
                                 }}
                             >
-                                <span className={isUsed ? 'line-through decoration-gray-400' : ''}>
+                                <span dir="auto" className={isUsed ? 'line-through decoration-gray-400' : ''}>
                                     {opt.label}
                                 </span>
                                 {isUsed && <span className="text-xs text-gray-400 italic ml-2">(Mapped)</span>}
@@ -664,7 +882,7 @@ const SearchableSelect: React.FC<{
                 className={`w-full p-2 border rounded cursor-pointer flex justify-between items-center text-sm transition-all flex-nowrap h-[38px] ${borderClass} ${bgClass}`}
                 onClick={() => setIsOpen(!isOpen)}
             >
-                <span className={`truncate flex items-center gap-2 ${!selectedOption && !value ? 'text-gray-400' : 'text-gray-800'}`}>
+                <span dir="auto" className={`truncate flex items-center gap-2 ${!selectedOption && !value ? 'text-gray-400' : 'text-gray-800'}`}>
                     {icon}
                     {currentLabel}
                 </span>
@@ -1060,11 +1278,6 @@ const ValidationErrorsView: React.FC<{
                                         {canEdit(item) ? (
                                             isDropdown(item) ? (
                                                 <div className="flex flex-col gap-2">
-                                                {bulkEditField === 'UPDATE - ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM' && (
-                                                    <div className="p-2 mb-1 bg-yellow-50 text-yellow-800 border border-yellow-200 rounded text-xs">
-                                                        <strong>Warning:</strong> This overrides ALL valid from dates for all groups on the selected employees.
-                                                    </div>
-                                                )}
                                                     <select
                                                         value={item.value || ""}
                                                         onChange={e => onUpdateValue(item.rawRowIndex, item.fullKey!, e.target.value)}
@@ -1287,12 +1500,13 @@ interface WageTypeSelectionProps {
     missingGroups: string[];
     hasExistingWageTypes: boolean;
     hasMissingValidFromDates?: boolean;
-    onComplete: (selections: Map<string, string>, overwrite: boolean, validFromDate: string) => void;
+    canSetDefaultWage?: boolean;
+    onComplete: (selections: Map<string, string>, overwrite: boolean, validFromDate: string, isDefaultGroupWage?: boolean) => void;
     onBack: () => void;
 }
 
-const WageTypeSelection: React.FC<WageTypeSelectionProps> = ({ missingGroups, hasExistingWageTypes, hasMissingValidFromDates, onComplete, onBack, isLoading }) => {
-    const [globalMode, setGlobalMode] = useState<'HourlyRate' | 'ShiftRate' | 'PER_GROUP' | null>(null);
+const WageTypeSelection: React.FC<WageTypeSelectionProps> = ({ missingGroups, hasExistingWageTypes, hasMissingValidFromDates, canSetDefaultWage = true, onComplete, onBack, isLoading }) => {
+    const [globalMode, setGlobalMode] = useState<'DEFAULT_WAGE' | 'HourlyRate' | 'ShiftRate' | 'PER_GROUP' | null>(null);
     const [groupSelections, setGroupSelections] = useState<Map<string, string>>(new Map());
     const [showConfirm, setShowConfirm] = useState<'ALL_HOURLY' | 'ALL_SHIFT' | 'CLEAR_ALL' | 'CONTINUE' | null>(null);
     const [formError, setFormError] = useState<string | null>(null);
@@ -1341,12 +1555,16 @@ const WageTypeSelection: React.FC<WageTypeSelectionProps> = ({ missingGroups, ha
             }
         }
         
-        if (globalMode === 'HourlyRate' || globalMode === 'ShiftRate') {
+        if (globalMode === 'DEFAULT_WAGE') {
+            const result = new Map<string, string>();
+            missingGroups.forEach(g => result.set(g, 'DEFAULT_WAGE'));
+            onComplete(result, overwrite, finalDate, true);
+        } else if (globalMode === 'HourlyRate' || globalMode === 'ShiftRate') {
             const result = new Map<string, string>();
             missingGroups.forEach(g => result.set(g, globalMode));
-            onComplete(result, overwrite, finalDate);
+            onComplete(result, overwrite, finalDate, false);
         } else if (globalMode === 'PER_GROUP') {
-            onComplete(groupSelections, overwrite, finalDate);
+            onComplete(groupSelections, overwrite, finalDate, false);
         }
     };
 
@@ -1370,7 +1588,7 @@ const WageTypeSelection: React.FC<WageTypeSelectionProps> = ({ missingGroups, ha
     };
 
     const handleContinue = () => {
-        if (globalMode === 'HourlyRate' || globalMode === 'ShiftRate') {
+        if (globalMode === 'DEFAULT_WAGE' || globalMode === 'HourlyRate' || globalMode === 'ShiftRate') {
             setShowConfirm('CONTINUE');
             return;
         }
@@ -1393,6 +1611,28 @@ const WageTypeSelection: React.FC<WageTypeSelectionProps> = ({ missingGroups, ha
              </p>
 
             <div className="space-y-4 mb-8">
+                {canSetDefaultWage && (
+                    <div 
+                       className={`border rounded-lg p-4 cursor-pointer transition-all ${globalMode === 'DEFAULT_WAGE' ? 'ring-2 ring-blue-500 bg-blue-50 border-blue-500' : 'border-gray-200 hover:border-gray-300'}`}
+                       onClick={() => setGlobalMode('DEFAULT_WAGE')}
+                    >
+                        <div className="flex items-start gap-3">
+                            <div className={`w-5 h-5 mt-1 rounded-full border flex items-center justify-center ${globalMode === 'DEFAULT_WAGE' ? 'border-blue-600' : 'border-gray-400'}`}>
+                                {globalMode === 'DEFAULT_WAGE' && <div className="w-2.5 h-2.5 bg-blue-600 rounded-full" />}
+                            </div>
+                            <div className="flex-1">
+                                <div className="font-bold flex items-center gap-2">
+                                    Set all to Default Group Wage
+                                    <span className="bg-green-100 text-green-800 text-xs font-semibold px-2 py-0.5 rounded-full">Recommended</span>
+                                </div>
+                                <p className="text-sm text-gray-500 mt-1">
+                                    Applies each employee group's pre-configured default pay rate, wage type (Hourly or Shift), and salary code from your Planday portal.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 <div 
                    className={`border rounded-lg p-4 cursor-pointer transition-all ${globalMode === 'HourlyRate' ? 'ring-2 ring-blue-500 bg-blue-50 border-blue-500' : 'border-gray-200 hover:border-gray-300'}`}
                    onClick={() => setGlobalMode('HourlyRate')}
@@ -1564,14 +1804,16 @@ const WageTypeSelection: React.FC<WageTypeSelectionProps> = ({ missingGroups, ha
                 onConfirm={confirmAction}
                 title={
                     showConfirm === 'CONTINUE' 
-                        ? (hasExistingWageTypes ? "Existing Wage Types Detected" : "Review Wage Types")
+                        ? (hasExistingWageTypes ? "Existing Wage Types Detected" : (globalMode === 'DEFAULT_WAGE' ? "Confirm Default Group Wage" : "Review Wage Types"))
                         : "Confirm Bulk Action"
                 }
                 message={
                     showConfirm === 'CONTINUE' 
                         ? (hasExistingWageTypes 
                             ? "Some employees already have an assigned wage type in the file. Would you like to overwrite the existing wage types or leave these unchanged for the respective employee groups?"
-                            : "Have you reviewed all the wage types for each group?")
+                            : (globalMode === 'DEFAULT_WAGE' 
+                                ? "This will assign each employee group's default pay rate, wage type, and salary code as configured in your Planday portal. Do you want to proceed?" 
+                                : "Have you reviewed all the wage types for each group?"))
                         : showConfirm === 'CLEAR_ALL' 
                             ? "Are you sure you want to deselect all wage types?" 
                             : `Are you sure you want to select ${showConfirm === 'ALL_HOURLY' ? 'Hourly Rate' : 'Shift Rate'} for all groups? This will clear any previously set wage types.`
@@ -1602,38 +1844,117 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
     const [selectedColumn, setSelectedColumn] = useState('');
     const [selectedApiIdColumn, setSelectedApiIdColumn] = useState('');
     
-    // New State for Name configuration
+    // Name configuration for ID & API_ID methods (Scenario A & B)
+    const [nameOption, setNameOption] = useState<'SPLIT' | 'SINGLE' | 'IGNORE'>('SPLIT');
+    const [idNameCol1, setIdNameCol1] = useState(''); // First Name OR Full Name
+    const [idNameCol2, setIdNameCol2] = useState(''); // Last Name
+
+    // Name configuration for NAME method (Scenario C)
     const [nameMode, setNameMode] = useState<'AUTO' | 'SINGLE' | 'SPLIT'>('AUTO');
     const [nameCol1, setNameCol1] = useState(''); // Single col OR First Name
     const [nameCol2, setNameCol2] = useState(''); // Last Name
 
     const options = useMemo(() => headers.map(h => ({ value: h, label: h })), [headers]);
 
+    // Intelligent auto-detection of fields from headers on mount
+    useEffect(() => {
+        if (!headers || headers.length === 0) return;
+
+        const plandayIdCol = headers.find(h => /^(planday\s*employee\s*id|employee\s*id)$/i.test(h.trim()));
+        const salaryIdCol = headers.find(h => /^(salary\s*identifier(\s*\(payroll\s*id\))?|payroll\s*id|salary\s*id)$/i.test(h.trim()));
+
+        const fnCol = headers.find(h => /^(first\s*name|firstname|fornavn|förnamn|vorname)$/i.test(h.trim()));
+        const lnCol = headers.find(h => /^(last\s*name|lastname|efternavn|efternamn|nachname|surname)$/i.test(h.trim()));
+        const fullNameCol = headers.find(h => /^(full\s*name|fullname|name|navn|namn|employee\s*name|employee)$/i.test(h.trim()));
+
+        // Method detection:
+        if (plandayIdCol) {
+            setMethod('API_ID');
+            setSelectedApiIdColumn(plandayIdCol);
+        } else if (salaryIdCol) {
+            setMethod('ID');
+            setSelectedColumn(salaryIdCol);
+        } else if (fnCol || fullNameCol) {
+            setMethod('NAME');
+        } else {
+            setMethod('ID');
+        }
+
+        // Name column pre-selection for ID methods:
+        if (fnCol && lnCol) {
+            setNameOption('SPLIT');
+            setIdNameCol1(fnCol);
+            setIdNameCol2(lnCol);
+        } else if (fullNameCol) {
+            setNameOption('SINGLE');
+            setIdNameCol1(fullNameCol);
+        } else {
+            setNameOption('IGNORE');
+        }
+
+        // Name column pre-selection for NAME method:
+        if (fnCol && lnCol) {
+            setNameMode('SPLIT');
+            setNameCol1(fnCol);
+            setNameCol2(lnCol);
+        } else if (fullNameCol) {
+            setNameMode('SINGLE');
+            setNameCol1(fullNameCol);
+        } else {
+            setNameMode('AUTO');
+        }
+    }, [headers]);
+
     const isNextDisabled = () => {
-        if (method === 'ID') return !selectedColumn;
-        if (method === 'API_ID') return !selectedApiIdColumn;
+        if (method === 'ID') {
+            if (!selectedColumn) return true;
+            if (nameOption === 'SPLIT' && (!idNameCol1 || !idNameCol2)) return true;
+            if (nameOption === 'SINGLE' && !idNameCol1) return true;
+            return false;
+        }
+        if (method === 'API_ID') {
+            if (!selectedApiIdColumn) return true;
+            if (nameOption === 'SPLIT' && (!idNameCol1 || !idNameCol2)) return true;
+            if (nameOption === 'SINGLE' && !idNameCol1) return true;
+            return false;
+        }
         if (method === 'NAME') {
-             if (nameMode === 'SINGLE' && !nameCol1) return true;
-             if (nameMode === 'SPLIT' && (!nameCol1 || !nameCol2)) return true;
+            if (nameMode === 'SINGLE' && !nameCol1) return true;
+            if (nameMode === 'SPLIT' && (!nameCol1 || !nameCol2)) return true;
+            return false;
         }
         return false;
     };
 
     const handleNext = () => {
         if (method === 'ID') {
-            onNext('ID', selectedColumn);
+            onNext('ID', {
+                idColumn: selectedColumn,
+                nameOption,
+                nameCol1: idNameCol1,
+                nameCol2: idNameCol2
+            });
         } else if (method === 'API_ID') {
-            onNext('API_ID', selectedApiIdColumn);
+            onNext('API_ID', {
+                idColumn: selectedApiIdColumn,
+                nameOption,
+                nameCol1: idNameCol1,
+                nameCol2: idNameCol2
+            });
         } else {
-            onNext('NAME', { mode: nameMode, col1: nameCol1, col2: nameCol2 });
+            onNext('NAME', {
+                mode: nameMode,
+                col1: nameCol1,
+                col2: nameCol2
+            });
         }
     };
 
     return (
         <div className="bg-white p-8 rounded-xl shadow-lg border border-gray-100 max-w-2xl mx-auto">
-             <h2 className="text-2xl font-bold mb-4">Identify Employees</h2>
+             <h2 className="text-2xl font-bold mb-2">Identify Employees & Map Columns</h2>
              <p className="text-gray-500 mb-6">
-                Your template was not generated from this app. How would you like to match employees from your file to the employee profiles in Planday?
+                Map how employees are identified from your file. To prevent ID mismatch errors from accidentally shifted rows, you can also map employee name columns for cross-check validation.
              </p>
 
              <div className="space-y-4 mb-8">
@@ -1653,14 +1974,78 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
                              <p className="text-sm text-gray-500 mt-1">Uses a specific column in your file to match against the Planday Payroll ID.</p>
                              
                              {method === 'ID' && (
-                                 <div className="mt-4 bg-white p-3 rounded border border-gray-200 animate-fadeIn" onClick={e => e.stopPropagation()}>
-                                     <label className="block text-xs font-bold text-gray-700 mb-1">Select Column containing ID:</label>
-                                     <SearchableSelect 
-                                        options={options} 
-                                        value={selectedColumn} 
-                                        onChange={setSelectedColumn} 
-                                        placeholder="-- Select ID Column --" 
-                                     />
+                                 <div className="mt-4 bg-white p-4 rounded-lg border border-gray-200 animate-fadeIn cursor-default" onClick={e => e.stopPropagation()}>
+                                     <div className="mb-4">
+                                         <label className="block text-xs font-bold text-gray-700 mb-1">Select Column containing Salary Identifier (Payroll ID):</label>
+                                         <SearchableSelect 
+                                            options={options} 
+                                            value={selectedColumn} 
+                                            onChange={setSelectedColumn} 
+                                            placeholder="-- Select ID Column --" 
+                                         />
+                                     </div>
+
+                                     {/* Name Mapping for Cross-Check Validation */}
+                                     <div className="pt-3 border-t border-gray-100">
+                                         <div className="flex items-center justify-between mb-1.5">
+                                             <label className="block text-xs font-bold text-gray-700">
+                                                 Employee Name Mapping (for Cross-Check Validation):
+                                             </label>
+                                             <span className="text-[11px] text-gray-500 italic">Verifies ID matches name</span>
+                                         </div>
+                                         <p className="text-xs text-gray-500 mb-2.5">
+                                             Map name columns in your file to verify that IDs align with the correct employee name.
+                                         </p>
+                                         <div className="flex flex-wrap gap-2 mb-3">
+                                             <button 
+                                                 type="button" 
+                                                 className={`px-2.5 py-1 text-xs rounded border transition-colors ${nameOption === 'SPLIT' ? 'bg-blue-100 text-blue-700 border-blue-300 font-semibold shadow-sm' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`} 
+                                                 onClick={() => setNameOption('SPLIT')}
+                                             >
+                                                 First & Last Name (Two Columns)
+                                             </button>
+                                             <button 
+                                                 type="button" 
+                                                 className={`px-2.5 py-1 text-xs rounded border transition-colors ${nameOption === 'SINGLE' ? 'bg-blue-100 text-blue-700 border-blue-300 font-semibold shadow-sm' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`} 
+                                                 onClick={() => setNameOption('SINGLE')}
+                                             >
+                                                 Full Name (Single Column)
+                                             </button>
+                                             <button 
+                                                 type="button" 
+                                                 className={`px-2.5 py-1 text-xs rounded border transition-colors ${nameOption === 'IGNORE' ? 'bg-amber-100 text-amber-800 border-amber-300 font-semibold shadow-sm' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`} 
+                                                 onClick={() => setNameOption('IGNORE')}
+                                             >
+                                                 Ignore, names not available in the file
+                                             </button>
+                                         </div>
+
+                                         {nameOption === 'SPLIT' && (
+                                             <div className="grid grid-cols-2 gap-2 animate-fadeIn">
+                                                 <div>
+                                                     <label className="block text-xs font-bold text-gray-600 mb-1">First Name Column:</label>
+                                                     <SearchableSelect options={options} value={idNameCol1} onChange={setIdNameCol1} placeholder="-- First Name Column --" />
+                                                 </div>
+                                                 <div>
+                                                     <label className="block text-xs font-bold text-gray-600 mb-1">Last Name Column:</label>
+                                                     <SearchableSelect options={options} value={idNameCol2} onChange={setIdNameCol2} placeholder="-- Last Name Column --" />
+                                                 </div>
+                                             </div>
+                                         )}
+
+                                         {nameOption === 'SINGLE' && (
+                                             <div className="animate-fadeIn">
+                                                 <label className="block text-xs font-bold text-gray-600 mb-1">Full Name Column:</label>
+                                                 <SearchableSelect options={options} value={idNameCol1} onChange={setIdNameCol1} placeholder="-- Full Name Column --" />
+                                             </div>
+                                         )}
+
+                                         {nameOption === 'IGNORE' && (
+                                             <p className="text-xs text-amber-800 bg-amber-50 p-2.5 rounded border border-amber-200 animate-fadeIn">
+                                                 ⚠️ <strong>Notice:</strong> Name cross-check will be skipped. The system will proceed with the import relying solely on the provided IDs.
+                                             </p>
+                                         )}
+                                     </div>
                                  </div>
                              )}
                          </div>
@@ -1683,14 +2068,78 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
                              <p className="text-sm text-gray-500 mt-1">Uses a specific column in your file to match against the Planday API Employee ID.</p>
                              
                              {method === 'API_ID' && (
-                                 <div className="mt-4 bg-white p-3 rounded border border-gray-200 animate-fadeIn" onClick={e => e.stopPropagation()}>
-                                     <label className="block text-xs font-bold text-gray-700 mb-1">Select Column containing Planday Employee ID:</label>
-                                     <SearchableSelect 
-                                        options={options} 
-                                        value={selectedApiIdColumn} 
-                                        onChange={setSelectedApiIdColumn} 
-                                        placeholder="-- Select API ID Column --" 
-                                     />
+                                 <div className="mt-4 bg-white p-4 rounded-lg border border-gray-200 animate-fadeIn cursor-default" onClick={e => e.stopPropagation()}>
+                                     <div className="mb-4">
+                                         <label className="block text-xs font-bold text-gray-700 mb-1">Select Column containing Planday Employee ID:</label>
+                                         <SearchableSelect 
+                                            options={options} 
+                                            value={selectedApiIdColumn} 
+                                            onChange={setSelectedApiIdColumn} 
+                                            placeholder="-- Select API ID Column --" 
+                                         />
+                                     </div>
+
+                                     {/* Name Mapping for Cross-Check Validation */}
+                                     <div className="pt-3 border-t border-gray-100">
+                                         <div className="flex items-center justify-between mb-1.5">
+                                             <label className="block text-xs font-bold text-gray-700">
+                                                 Employee Name Mapping (for Cross-Check Validation):
+                                             </label>
+                                             <span className="text-[11px] text-gray-500 italic">Verifies ID matches name</span>
+                                         </div>
+                                         <p className="text-xs text-gray-500 mb-2.5">
+                                             Map name columns in your file to verify that IDs align with the correct employee name.
+                                         </p>
+                                         <div className="flex flex-wrap gap-2 mb-3">
+                                             <button 
+                                                 type="button" 
+                                                 className={`px-2.5 py-1 text-xs rounded border transition-colors ${nameOption === 'SPLIT' ? 'bg-blue-100 text-blue-700 border-blue-300 font-semibold shadow-sm' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`} 
+                                                 onClick={() => setNameOption('SPLIT')}
+                                             >
+                                                 First & Last Name (Two Columns)
+                                             </button>
+                                             <button 
+                                                 type="button" 
+                                                 className={`px-2.5 py-1 text-xs rounded border transition-colors ${nameOption === 'SINGLE' ? 'bg-blue-100 text-blue-700 border-blue-300 font-semibold shadow-sm' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`} 
+                                                 onClick={() => setNameOption('SINGLE')}
+                                             >
+                                                 Full Name (Single Column)
+                                             </button>
+                                             <button 
+                                                 type="button" 
+                                                 className={`px-2.5 py-1 text-xs rounded border transition-colors ${nameOption === 'IGNORE' ? 'bg-amber-100 text-amber-800 border-amber-300 font-semibold shadow-sm' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`} 
+                                                 onClick={() => setNameOption('IGNORE')}
+                                             >
+                                                 Ignore, names not available in the file
+                                             </button>
+                                         </div>
+
+                                         {nameOption === 'SPLIT' && (
+                                             <div className="grid grid-cols-2 gap-2 animate-fadeIn">
+                                                 <div>
+                                                     <label className="block text-xs font-bold text-gray-600 mb-1">First Name Column:</label>
+                                                     <SearchableSelect options={options} value={idNameCol1} onChange={setIdNameCol1} placeholder="-- First Name Column --" />
+                                                 </div>
+                                                 <div>
+                                                     <label className="block text-xs font-bold text-gray-600 mb-1">Last Name Column:</label>
+                                                     <SearchableSelect options={options} value={idNameCol2} onChange={setIdNameCol2} placeholder="-- Last Name Column --" />
+                                                 </div>
+                                             </div>
+                                         )}
+
+                                         {nameOption === 'SINGLE' && (
+                                             <div className="animate-fadeIn">
+                                                 <label className="block text-xs font-bold text-gray-600 mb-1">Full Name Column:</label>
+                                                 <SearchableSelect options={options} value={idNameCol1} onChange={setIdNameCol1} placeholder="-- Full Name Column --" />
+                                             </div>
+                                         )}
+
+                                         {nameOption === 'IGNORE' && (
+                                             <p className="text-xs text-amber-800 bg-amber-50 p-2.5 rounded border border-amber-200 animate-fadeIn">
+                                                 ⚠️ <strong>Notice:</strong> Name cross-check will be skipped. The system will proceed with the import relying solely on the provided IDs.
+                                             </p>
+                                         )}
+                                     </div>
                                  </div>
                              )}
                          </div>
@@ -1710,16 +2159,16 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
                                  <UserGroupIcon className="w-5 h-5 text-gray-500"/>
                                  Match by Name
                              </div>
-                             <p className="text-sm text-gray-500 mt-1">Attempts to match First and Last names.</p>
+                             <p className="text-sm text-gray-500 mt-1">Uses employee names as primary identification. No reverse ID lookups or cross-checks are performed.</p>
                              
                              {method === 'NAME' && (
-                                <div className="mt-4 bg-white p-3 rounded border border-gray-200 cursor-default" onClick={e => e.stopPropagation()}>
+                                <div className="mt-4 bg-white p-4 rounded-lg border border-gray-200 cursor-default" onClick={e => e.stopPropagation()}>
                                     <div className="mb-3">
                                          <label className="block text-xs font-bold text-gray-700 mb-1">Name Format in File:</label>
                                          <div className="flex gap-2">
-                                             <button className={`px-2 py-1 text-xs rounded border transition-colors ${nameMode === 'AUTO' ? 'bg-blue-100 text-blue-700 border-blue-300 font-semibold' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`} onClick={() => setNameMode('AUTO')}>Auto-Detect</button>
-                                             <button className={`px-2 py-1 text-xs rounded border transition-colors ${nameMode === 'SINGLE' ? 'bg-blue-100 text-blue-700 border-blue-300 font-semibold' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`} onClick={() => setNameMode('SINGLE')}>Single Column</button>
-                                             <button className={`px-2 py-1 text-xs rounded border transition-colors ${nameMode === 'SPLIT' ? 'bg-blue-100 text-blue-700 border-blue-300 font-semibold' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`} onClick={() => setNameMode('SPLIT')}>Two Columns</button>
+                                             <button type="button" className={`px-2 py-1 text-xs rounded border transition-colors ${nameMode === 'AUTO' ? 'bg-blue-100 text-blue-700 border-blue-300 font-semibold' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`} onClick={() => setNameMode('AUTO')}>Auto-Detect</button>
+                                             <button type="button" className={`px-2 py-1 text-xs rounded border transition-colors ${nameMode === 'SINGLE' ? 'bg-blue-100 text-blue-700 border-blue-300 font-semibold' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`} onClick={() => setNameMode('SINGLE')}>Single Column</button>
+                                             <button type="button" className={`px-2 py-1 text-xs rounded border transition-colors ${nameMode === 'SPLIT' ? 'bg-blue-100 text-blue-700 border-blue-300 font-semibold' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`} onClick={() => setNameMode('SPLIT')}>Two Columns</button>
                                          </div>
                                     </div>
 
@@ -1744,7 +2193,7 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
                                     )}
                                     
                                     {nameMode === 'AUTO' && (
-                                         <p className="text-xs text-gray-500 italic animate-fadeIn">We will try to automatically identify name columns like "Name", "Employee", "First Name", "Last Name".</p>
+                                         <p className="text-xs text-gray-500 italic animate-fadeIn">We will automatically identify name columns like "Name", "Employee", "First Name", "Last Name".</p>
                                     )}
                                 </div>
                             )}
@@ -1789,9 +2238,26 @@ const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initia
     
     useEffect(() => {
         if (initialMapping) {
-            setMapping(initialMapping);
+            const sanitizedMap = new Map<number, number | null>();
             const initialMatchTypes = new Map<number, 'exact' | 'auto' | 'manual'>();
-            initialMapping.forEach((val, key) => initialMatchTypes.set(key, 'exact'));
+            const usedIds = new Set<number>();
+
+            initialMapping.forEach((val, key) => {
+                if (val !== null && val !== undefined) {
+                    if (!usedIds.has(val)) {
+                        usedIds.add(val);
+                        sanitizedMap.set(key, val);
+                        initialMatchTypes.set(key, 'exact');
+                    } else {
+                        // Prevent the same employee from being assigned to multiple rows
+                        sanitizedMap.set(key, null);
+                    }
+                } else {
+                    sanitizedMap.set(key, null);
+                }
+            });
+
+            setMapping(sanitizedMap);
             setMatchTypes(initialMatchTypes);
             return;
         }
@@ -1799,34 +2265,24 @@ const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initia
         // Fallback to name matching if no initial map provided (should not happen with new flow, but good for safety)
         const newMap = new Map<number, number | null>();
         const newMatchTypes = new Map<number, 'exact' | 'auto' | 'manual'>();
+        const usedFallbackIds = new Set<number>();
         
         const empMap = new Map<string, number>();
         employees.forEach(e => {
-            empMap.set(`${e.firstName.toLowerCase()} ${e.lastName.toLowerCase()}`, e.id);
-            empMap.set(`${e.firstName} ${e.lastName}`.toLowerCase(), e.id);
+            const fn = normalizeMultilingualText(e.firstName || "");
+            const ln = normalizeMultilingualText(e.lastName || "");
+            empMap.set(`${fn} ${ln}`.trim(), e.id);
+            empMap.set(`${fn}${ln}`.trim(), e.id);
         });
 
         rows.forEach((row, idx) => {
-            let name = "";
-            const keys = Object.keys(row).map(k => k.toLowerCase());
-            
-            if (row["First Name"] && row["Last Name"]) {
-                name = `${row["First Name"]} ${row["Last Name"]}`;
-            } else if (row["Name"]) {
-                name = row["Name"];
-            } else if (row["Employee"]) {
-                name = row["Employee"];
-            } else if (row["Full Name"]) {
-                name = row["Full Name"];
-            } else {
-                const nameKey = Object.keys(row).find(k => k.toLowerCase().includes('name'));
-                if (nameKey) name = row[nameKey];
-            }
+            const name = extractEmployeeName(row);
             
             if (name) {
-                const cleanName = String(name).toLowerCase().trim();
-                const matchedId = empMap.get(cleanName);
-                if (matchedId) {
+                const cleanName = normalizeMultilingualText(name);
+                const matchedId = empMap.get(cleanName) || empMap.get(cleanName.replace(/\s+/g, ''));
+                if (matchedId && !usedFallbackIds.has(matchedId)) {
+                    usedFallbackIds.add(matchedId);
                     newMap.set(idx, matchedId);
                     newMatchTypes.set(idx, 'exact');
                 } else {
@@ -1861,30 +2317,74 @@ const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initia
         const newMatchTypes = new Map(matchTypes);
         let changed = false;
 
-        rows.forEach((row, idx) => {
-            if (!newMap.get(idx)) {
-                const rowName = extractEmployeeName(row);
-                const searchString = (rowName || Object.values(row).join(" ")).toLowerCase();
-                
-                if (searchString) {
-                    let bestMatch = null;
-                    let bestScore = 0;
-                    employeeOptions.forEach(opt => {
-                        const score = calculateSimilarity(searchString, opt.label);
-                        if (score > bestScore) {
-                            bestScore = score;
-                            bestMatch = opt.value;
-                        }
-                    });
-
-                    if (bestScore >= SIMILARITY_THRESHOLD && bestMatch) {
-                        newMap.set(idx, bestMatch as number);
-                        newMatchTypes.set(idx, 'auto');
-                        changed = true;
-                    }
-                }
+        // 1. Collect all employee IDs currently mapped (so already-mapped employees cannot be re-suggested)
+        const alreadyClaimedEmpIds = new Set<number>();
+        mapping.forEach((val) => {
+            if (val !== null && val !== undefined) {
+                alreadyClaimedEmpIds.add(val);
             }
         });
+
+        // 2. Identify all unmapped row indices
+        const unmappedIndices: number[] = [];
+        rows.forEach((_, idx) => {
+            if (!newMap.get(idx)) {
+                unmappedIndices.push(idx);
+            }
+        });
+
+        // 3. Available options: only employees not currently claimed
+        const availableOptions = employeeOptions.filter(
+            opt => typeof opt.value === 'number' && !alreadyClaimedEmpIds.has(opt.value)
+        );
+
+        // 4. Collect candidate matches for all unmapped rows
+        interface CandidateMatch {
+            rowIdx: number;
+            empId: number;
+            score: number;
+        }
+        const candidates: CandidateMatch[] = [];
+
+        unmappedIndices.forEach(rowIdx => {
+            const row = rows[rowIdx];
+            const rowName = extractEmployeeName(row);
+            const searchString = (rowName || Object.values(row).join(" ")).toLowerCase().trim();
+            if (!searchString) return;
+
+            availableOptions.forEach(opt => {
+                const score = calculateSimilarity(searchString, opt.label);
+                if (score >= SIMILARITY_THRESHOLD) {
+                    candidates.push({
+                        rowIdx,
+                        empId: opt.value as number,
+                        score
+                    });
+                }
+            });
+        });
+
+        // 5. Sort candidates globally descending by score (highest confidence matches first)
+        candidates.sort((a, b) => b.score - a.score);
+
+        // 6. Greedily assign matches 1-to-1: each row and each employee can only be matched once
+        const claimedRows = new Set<number>();
+        const claimedEmployees = new Set<number>(alreadyClaimedEmpIds);
+
+        for (const cand of candidates) {
+            if (claimedRows.has(cand.rowIdx)) {
+                continue; // This row already received a higher confidence match
+            }
+            if (claimedEmployees.has(cand.empId)) {
+                continue; // This employee is already claimed by another row
+            }
+
+            newMap.set(cand.rowIdx, cand.empId);
+            newMatchTypes.set(cand.rowIdx, 'auto');
+            claimedRows.add(cand.rowIdx);
+            claimedEmployees.add(cand.empId);
+            changed = true;
+        }
 
         if (changed) {
             setMapping(newMap);
@@ -2154,7 +2654,7 @@ const EmployeeMapperRow: React.FC<{
 
     return (
         <tr className={`hover:bg-gray-50 ${isUnmapped ? 'bg-[#ffe5e5]' : ''}`}>
-            <td className="p-3 text-gray-600 truncate max-w-md align-middle" title={preview}>{preview}</td>
+            <td className="p-3 text-gray-600 truncate max-w-md align-middle" dir="auto" title={preview}>{preview}</td>
             <td className="p-3 align-middle">
                 <SearchableSelect 
                     options={sortedOptions}
@@ -2227,7 +2727,7 @@ const FieldMapperRow: React.FC<{
 
     return (
         <tr className={`hover:bg-gray-50 ${(isUnmapped && !isIdentity) ? 'bg-[#ffe5e5]' : ''}`}>
-            <td className="p-3 font-medium text-gray-800 align-middle">{header}</td>
+            <td className="p-3 font-medium text-gray-800 align-middle" dir="auto">{header}</td>
             <td className="p-3 align-middle">
                 {isIdentity ? (
                     <span className="text-gray-400 italic">Already Mapped (Identity)</span>
@@ -2299,7 +2799,7 @@ const FieldMapper: React.FC<FieldMapperProps> = ({ fileHeaders, availableTargets
                 );
 
                 if (!match) {
-                    const cleanLower = lower.replace(/[^a-z0-9]/g, '');
+                    const cleanLower = lower.normalize('NFKC').replace(/[^\p{L}\p{N}]/gu, '');
                     const aliasMap: Record<string, string[]> = {
                         'mobile': ['cellphone', 'mobile', 'phone', 'cell'],
                         'country code': ['cellphonecountrycode', 'phonecode', 'countrycode', 'mobilecountrycode'],
@@ -2379,7 +2879,7 @@ const FieldMapper: React.FC<FieldMapperProps> = ({ fileHeaders, availableTargets
                             
                             const tName = lbl.replace(targetPrefix, '').trim();
                             if (tName === cleanItemName) return true;
-                            if (tName.replace(/[^a-z0-9]/g, '') === cleanItemName.replace(/[^a-z0-9]/g, '')) return true;
+                            if (tName.normalize('NFKC').replace(/[^\p{L}\p{N}]/gu, '') === cleanItemName.normalize('NFKC').replace(/[^\p{L}\p{N}]/gu, '')) return true;
                             return false;
                         });
                     };
@@ -2814,7 +3314,8 @@ const DateAmbiguityResolver: React.FC<{
     onUpdate: (id: string, century: 1900 | 2000) => void;
     onContinue: () => void;
     onBack: () => void;
-}> = ({ items, onUpdate, onContinue, onBack }) => {
+    isLoading?: boolean;
+}> = ({ items, onUpdate, onContinue, onBack, isLoading }) => {
     return (
         <div className="bg-white p-8 rounded-xl shadow-lg border border-gray-100">
             <div className="flex items-center gap-3 mb-6">
@@ -3500,6 +4001,7 @@ const EditableCell = React.memo(({
         return (
             <div className="relative group/cell" ref={cellRef} onMouseEnter={() => setIsHovered(true)} onMouseLeave={() => setIsHovered(false)}>
                 <select
+                    dir="auto"
                     className={`w-full min-w-[100px] bg-white border ${isFormatError ? 'border-red-600 bg-red-100 focus:ring-red-600 focus:border-red-600 outline-none ring-1 ring-red-600 text-red-900' : 'border-gray-300 shadow-sm hover:border-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500'} rounded px-3 py-1.5 transition-colors text-gray-900`}
                     value={draftValue}
                     onFocus={() => {
@@ -3524,6 +4026,7 @@ const EditableCell = React.memo(({
         <div className="relative group/cell" ref={cellRef} onMouseEnter={() => setIsHovered(true)} onMouseLeave={() => setIsHovered(false)}>
             <input 
                 type="text" 
+                dir="auto"
                 className={`w-full min-w-[40px] bg-white border ${isFormatError ? 'border-red-600 bg-red-100 focus:ring-red-600 focus:border-red-600 outline-none ring-1 ring-red-600 text-red-900' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500 hover:border-gray-400'} shadow-sm focus:outline-none focus:ring-1 rounded px-3 py-1.5 transition-colors text-gray-900`} 
                 value={draftValue} 
                 onChange={(e) => setDraftValue(e.target.value)} 
@@ -3593,7 +4096,7 @@ const TableRow = React.memo(({
                             onChange={e => onSelectRow(review.employeeId, e.target.checked)}
                         />
                         <div className="flex flex-col min-w-0">
-                            <span className="font-medium truncate text-gray-800" title={review.employeeName}>{review.employeeName}</span>
+                            <span dir="auto" className="font-medium truncate text-gray-800" title={review.employeeName}>{review.employeeName}</span>
                             {salaryIdentifier && <span className="text-xs text-gray-500 truncate">SID: {salaryIdentifier}</span>}
                         </div>
                     </div>
@@ -3866,10 +4369,19 @@ const App: React.FC = () => {
     const [selectedIdentityMethod, setSelectedIdentityMethod] = useState<'NAME' | 'ID' | 'API_ID'>('NAME');
     const [selectedIdentityColumns, setSelectedIdentityColumns] = useState<string[]>([]);
     const [fieldMapping, setFieldMapping] = useState<Map<string, string>>(new Map());
-    const [departmentAddRemoveAction, setDepartmentAddRemoveAction] = useState<'x' | 'REMOVE' | null>(null);
-    const [pendingMapping, setPendingMapping] = useState<Map<string, string> | null>(null);
-    const [showDeptActionPrompt, setShowDeptActionPrompt] = useState(false);
     const [missingWageTypeGroups, setMissingWageTypeGroups] = useState<string[]>([]);
+    
+    // Discrepancy validation state
+    const [discrepancies, setDiscrepancies] = useState<DiscrepancyItem[]>([]);
+    const [showDiscrepancyModal, setShowDiscrepancyModal] = useState<boolean>(false);
+    const [ignoredDiscrepancies, setIgnoredDiscrepancies] = useState<boolean>(false);
+    const [pendingIdConfig, setPendingIdConfig] = useState<{
+        method: 'ID' | 'API_ID';
+        idCol: string;
+        nameOption?: string;
+        nameCol1?: string;
+        nameCol2?: string;
+    } | null>(null);
 
     const [showConfirmModal, setShowConfirmModal] = useState(false);
     const [isMissingFieldsExpanded, setIsMissingFieldsExpanded] = useState(false);
@@ -3897,6 +4409,10 @@ const App: React.FC = () => {
         // Clear bulk edit fields when navigating across steps
         setBulkEditField('');
         setBulkEditValue('');
+
+        if (currentStep === 'review') {
+            setShowLoadingBar(false);
+        }
 
         if (currentStep === 'review' && allEmployees.length === 0) {
             fetchEmployees().then(emp => {
@@ -4008,41 +4524,50 @@ const App: React.FC = () => {
         recordChange(updatedJson, newCols);
     };
 
-    const handleChangeCredentials = () => {
-        sessionStorage.removeItem('plandayCredentials');
-        resetService();
-        setDefinitions(null);
-        setAllEmployees([]);
-        setSelectedSections({
-            system: true,
-            custom: false,
-            salary: false,
-            contract: false,
-            skills: false,
-            supervisor: false
-        });
-        setPopulateData(false);
-        setReviews([]);
-        setRawFileJson(null);
-        setExplicitAddedCols(new Set());
-        setHistory([]);
-        setHistoryIndex(-1);
-        setUnmappedJson([]);
-        setEmployeeMapping(new Map());
-        setInitialAutoMapping(new Map());
-        setFieldMapping(new Map());
-        setAmbiguousDates([]);
-        setValidationErrors([]);
-        setValidationSource('upload');
-        setDateReport([]); 
-        setError(null);
-        setIsLoading(false);
-        setLoadingText('');
-        setProgress(0);
-        setTotalItems(0);
-        setCompletedCount(0);
-        setShowConfirmModal(false);
-        setCurrentStep('auth');
+    const handleChangeCredentials = async () => {
+        setIsLoading(true);
+        setLoadingText('Disconnecting from Planday...');
+        try {
+            await revokeToken();
+        } catch (e) {
+            console.warn('Error during token revocation:', e);
+        } finally {
+            sessionStorage.removeItem('plandayCredentials');
+            resetService();
+            setPortalName(null);
+            setDefinitions(null);
+            setAllEmployees([]);
+            setSelectedSections({
+                system: true,
+                custom: false,
+                salary: false,
+                contract: false,
+                skills: false,
+                supervisor: false
+            });
+            setPopulateData(false);
+            setReviews([]);
+            setRawFileJson(null);
+            setExplicitAddedCols(new Set());
+            setHistory([]);
+            setHistoryIndex(-1);
+            setUnmappedJson([]);
+            setEmployeeMapping(new Map());
+            setInitialAutoMapping(new Map());
+            setFieldMapping(new Map());
+            setAmbiguousDates([]);
+            setValidationErrors([]);
+            setValidationSource('upload');
+            setDateReport([]); 
+            setError(null);
+            setIsLoading(false);
+            setLoadingText('');
+            setProgress(0);
+            setTotalItems(0);
+            setCompletedCount(0);
+            setShowConfirmModal(false);
+            setCurrentStep('auth');
+        }
     };
 
     const handleStartNewUpdate = () => {
@@ -4814,7 +5339,29 @@ const App: React.FC = () => {
         reader.onload = async (evt) => {
             try {
                 const data = new Uint8Array(evt.target?.result as ArrayBuffer);
-                const wb = XLSX.read(data, { type: 'array', cellDates: true });
+                let wb;
+                if (file.name.toLowerCase().endsWith('.csv')) {
+                    // Resilient CSV decoding for multilingual characters (UTF-8, UTF-8 with BOM, and fallback)
+                    let decodedText: string | null = null;
+                    try {
+                        const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
+                        decodedText = utf8Decoder.decode(data);
+                    } catch {
+                        try {
+                            const fallbackDecoder = new TextDecoder('windows-1252');
+                            decodedText = fallbackDecoder.decode(data);
+                        } catch {
+                            decodedText = null;
+                        }
+                    }
+                    if (decodedText) {
+                        wb = XLSX.read(decodedText, { type: 'string', cellDates: true });
+                    } else {
+                        wb = XLSX.read(data, { type: 'array', cellDates: true, codepage: 65001 });
+                    }
+                } else {
+                    wb = XLSX.read(data, { type: 'array', cellDates: true, codepage: 65001 });
+                }
                 const ws = wb.Sheets[wb.SheetNames[0]]; 
 
                 const rawArray: any[][] = XLSX.utils.sheet_to_json(ws, { raw: true, header: 1 });
@@ -4832,7 +5379,7 @@ const App: React.FC = () => {
                     if (orig === undefined || orig === null || String(orig).trim() === '') {
                         orig = `Column${i}`;
                     } else {
-                        orig = String(orig);
+                        orig = String(orig).normalize('NFKC').trim();
                     }
                     const lower = orig.toLowerCase();
                     
@@ -4861,7 +5408,7 @@ const App: React.FC = () => {
                         if (rowArray[c] !== undefined && rowArray[c] !== null && String(rowArray[c]).trim() !== "") {
                             let cellValue = rowArray[c];
                             if (typeof cellValue === 'string') {
-                                cellValue = cellValue.trim();
+                                cellValue = cellValue.normalize('NFKC').trim();
                             }
                             rowObj[dedupedHeaders[c]] = cellValue;
                             hasData = true;
@@ -4912,40 +5459,25 @@ const App: React.FC = () => {
                     return true;
                 });
 
-                // --- NEW PATH: Custom file without ID or with unknown columns ---
-                if (!hasIdColumn || hasUnknownColumns) {
-                    setUnmappedJson(json);
-                    
-                    // Need employees list for mapping
-                    if (allEmployees.length === 0) {
-                        setLoadingText("Fetching current employees for mapping...");
-                        const employees = await fetchEmployees();
-                        setAllEmployees(employees);
-                    }
-                    
-                    setIsLoading(false);
-                    
-                    if (hasIdColumn) {
-                       // We have the ID, so skip identity method and employee mapping, go straight to field mapping
-                       const empMapping = new Map<number, number>();
-                       json.forEach((row, idx) => {
-                           const pid = row["Planday Employee ID"];
-                           if (pid) empMapping.set(idx, parseInt(pid, 10));
-                       });
-                       setEmployeeMapping(empMapping);
-                       setSelectedIdentityMethod('ID');
-                       setSelectedIdentityColumns(['Planday Employee ID', 'First Name', 'Last Name', 'Salary Identifier (Payroll ID)']);
-                       setCurrentStep('map_fields');
-                    } else {
-                       // Route to Identity Selection Method
-                       setCurrentStep('identity_method'); 
-                    }
-                    return;
+                // CRUCIAL WORKFLOW RULE: Never Skip Mapping.
+                // Whether the user is uploading their own custom file or the app's dedicated template,
+                // the mapping stage for identification must ALWAYS occur. Do not route the user past the mapping UI under any circumstances.
+                setUnmappedJson(json);
+                setDiscrepancies([]);
+                setShowDiscrepancyModal(false);
+                setIgnoredDiscrepancies(false);
+                setPendingIdConfig(null);
+
+                // Fetch current employees for identification & cross-check validation
+                if (allEmployees.length === 0) {
+                    setLoadingText("Fetching current employees for mapping...");
+                    const employees = await fetchEmployees();
+                    setAllEmployees(employees);
                 }
-
-                // --- EXISTING PATH: Standard Template ---
-                processStandardJson(json);
-
+                
+                setIsLoading(false);
+                setCurrentStep('identity_method');
+                return;
             } catch (e: any) { setError(e.message); setIsLoading(false); }
         };
         reader.readAsArrayBuffer(file);
@@ -5009,8 +5541,6 @@ const App: React.FC = () => {
 
         // Groups (Generic for custom mapping is tricky, stick to simple ones first or list them all)
         targets.push({ key: 'ALL_EMPLOYEE_GROUPS', label: '✨ All Employee groups (split by comma/semicolon)' });
-        add('Employee group list (assign default rate)');
-        add('Employee group list - Valid from');
         targets.push({ key: 'ALL_EMPLOYEE_GROUPS_RATES', label: '✨ All Employee groups rates (split by comma/semicolon)' });
         targets.push({ key: 'ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM', label: '✨ All Employee groups rates valid from' });
         targets.push({ key: 'ALL_WAGE_SALARY_VALID_FROM', label: '✨ All Wage and Salaries valid from' });
@@ -5025,60 +5555,66 @@ const App: React.FC = () => {
     };
 
     const handleIdentityMethodSelection = (method: 'NAME' | 'ID' | 'API_ID', config?: any) => {
-        setIsLoading(true);
-        setShowLoadingBar(true);
-        setLoadingText("Identifying employees...");
-        
-        setTimeout(() => {
-            setSelectedIdentityMethod(method);
-            const autoMap = new Map<number, number | null>();
-            
-            let usedCols: string[] = [];
-            
-            // Build employee lookup map (name -> id)
-            const empMap = new Map<string, number>();
-            allEmployees.forEach(e => {
-                empMap.set(`${e.firstName.toLowerCase()} ${e.lastName.toLowerCase()}`, e.id);
-                empMap.set(`${e.firstName} ${e.lastName}`.toLowerCase(), e.id); // redundancy check
-            });
+        setSelectedIdentityMethod(method);
 
-            if (method === 'NAME') {
+        if (method === 'NAME') {
+            // Scenario C: Method is "Names" (Reverse Logic)
+            // If the user chooses "Names" as their primary upload/identification method (instead of an ID method),
+            // do NOT perform any reverse lookups or cross-checks for IDs. Rely strictly on the mapped names
+            // to identify the employee and take them through the normal name checking stage.
+            setIsLoading(true);
+            setShowLoadingBar(true);
+            setLoadingText("Identifying employees by name...");
+
+            setTimeout(() => {
+                const autoMap = new Map<number, number | null>();
+                const matchedEmpIds = new Set<number>();
+                const usedCols: string[] = [];
+
+                const empMap = new Map<string, number>();
+                allEmployees.forEach(e => {
+                    const fn = normalizeMultilingualText(e.firstName || "");
+                    const ln = normalizeMultilingualText(e.lastName || "");
+                    empMap.set(`${fn} ${ln}`.trim(), e.id);
+                    empMap.set(`${fn}${ln}`.trim(), e.id);
+                });
+
                 const mode = config?.mode || 'AUTO';
-                
+
                 unmappedJson.forEach((row, idx) => {
                     let nameToMatch = "";
-                    
                     if (mode === 'AUTO') {
                         const keys = Object.keys(row);
-                        const kLower = keys.map(k => ({ key: k, lower: k.toLowerCase().replace(/[^a-z0-9]/g, '') }));
+                        const kLower = keys.map(k => ({ key: k, lower: normalizeMultilingualText(k).replace(/[^\p{L}\p{N}]/gu, '') }));
 
                         const findAliasedKey = (aliases: string[]) => {
-                             const match = kLower.find(k => aliases.includes(k.lower));
-                             if (match && !usedCols.includes(match.key)) {
-                                 usedCols.push(match.key);
-                             }
-                             return match ? row[match.key] : null;
+                            const normAliases = aliases.map(a => normalizeMultilingualText(a).replace(/[^\p{L}\p{N}]/gu, ''));
+                            const match = kLower.find(k => normAliases.includes(k.lower));
+                            if (match && !usedCols.includes(match.key)) {
+                                usedCols.push(match.key);
+                            }
+                            return match ? row[match.key] : null;
                         };
 
-                        const firstName = findAliasedKey(['firstname', 'first', 'givenname']);
-                        const lastName = findAliasedKey(['lastname', 'last', 'surname', 'familyname']);
+                        const firstName = findAliasedKey(['firstname', 'first', 'givenname', 'fornavn', 'fornamn', 'förnamn', 'vorname', 'όνομα', 'πρώτο όνομα', 'μικρό όνομα', 'имя', 'الاسم الأول', 'الاسم الاول', 'اسم الشخص', 'prénom', 'prenom', 'nombre', 'nome', 'imię']);
+                        const lastName = findAliasedKey(['lastname', 'last', 'surname', 'familyname', 'efternavn', 'efternamn', 'etternavn', 'nachname', 'επώνυμο', 'επίθετο', 'фамилия', 'اسم العائلة', 'اسم العائله', 'الكنية', 'الكنيه', 'الشهرة', 'الشهره', 'nom', 'apellido', 'cognome', 'nazwisko']);
                         if (firstName && lastName) {
-                             nameToMatch = `${firstName} ${lastName}`;
+                            nameToMatch = `${firstName} ${lastName}`;
                         } else {
-                             const fullName = findAliasedKey(['name', 'employee', 'fullname', 'employeename']);
-                             if (fullName) {
-                                 nameToMatch = fullName;
-                             } else if (firstName) {
-                                 nameToMatch = firstName;
-                             } else if (lastName) {
-                                 nameToMatch = lastName;
-                             } else {
-                                 const nameKeyMatch = kLower.find(k => k.lower.includes('name'));
-                                 if (nameKeyMatch) {
-                                     nameToMatch = row[nameKeyMatch.key];
-                                     if (!usedCols.includes(nameKeyMatch.key)) usedCols.push(nameKeyMatch.key);
-                                 }
-                             }
+                            const fullName = findAliasedKey(['name', 'employee', 'fullname', 'employeename', 'navn', 'namn', 'fuldenavn', 'πλήρες όνομα', 'ονοματεπώνυμο', 'фио', 'полное имя', 'сотрудник', 'الاسم', 'الاسم الكامل', 'اسم الموظف']);
+                            if (fullName) {
+                                nameToMatch = fullName;
+                            } else if (firstName) {
+                                nameToMatch = firstName;
+                            } else if (lastName) {
+                                nameToMatch = lastName;
+                            } else {
+                                const nameKeyMatch = kLower.find(k => k.lower.includes('name') || k.lower.includes('navn') || k.lower.includes('namn') || k.lower.includes('ονομα') || k.lower.includes('имя') || k.lower.includes('фио') || k.lower.includes('اسم'));
+                                if (nameKeyMatch) {
+                                    nameToMatch = row[nameKeyMatch.key];
+                                    if (!usedCols.includes(nameKeyMatch.key)) usedCols.push(nameKeyMatch.key);
+                                }
+                            }
                         }
                     } else if (mode === 'SINGLE') {
                         nameToMatch = row[config.col1] || "";
@@ -5092,62 +5628,196 @@ const App: React.FC = () => {
                     }
 
                     if (nameToMatch) {
-                         const cleanName = String(nameToMatch).toLowerCase().trim().replace(/\s+/g, ' '); // normalize spaces
-                         const matchedId = empMap.get(cleanName);
-                         autoMap.set(idx, matchedId || null);
+                        const cleanName = normalizeMultilingualText(String(nameToMatch)).replace(/\s+/g, ' ');
+                        const matchedId = empMap.get(cleanName) || empMap.get(cleanName.replace(/\s+/g, ''));
+                        if (matchedId && !matchedEmpIds.has(matchedId)) {
+                            autoMap.set(idx, matchedId);
+                            matchedEmpIds.add(matchedId);
+                        } else {
+                            autoMap.set(idx, null);
+                        }
                     } else {
                         autoMap.set(idx, null);
                     }
                 });
-            } else if (method === 'ID' && config) {
-                // ID Matching Logic
-                // config is column name string in this case
-                if (config && !usedCols.includes(config)) usedCols.push(config);
-                const idMap = new Map<string, number>();
-                allEmployees.forEach(e => {
-                    if (e.salaryIdentifier) {
-                        idMap.set(String(e.salaryIdentifier).trim().toLowerCase(), e.id);
-                    }
-                });
-                unmappedJson.forEach((row, idx) => {
-                    const val = row[config];
-                    if (val !== undefined && val !== null) {
-                        const cleanVal = String(val).trim().toLowerCase();
-                        const matchedId = idMap.get(cleanVal);
-                        autoMap.set(idx, matchedId || null);
-                    } else {
-                        autoMap.set(idx, null);
-                    }
-                });
-            } else if (method === 'API_ID' && config) {
-                // API ID Matching Logic
-                if (config && !usedCols.includes(config)) usedCols.push(config);
-                const idMap = new Map<string, number>();
-                allEmployees.forEach(e => {
-                    if (e.id) {
-                        idMap.set(String(e.id).trim().toLowerCase(), e.id);
-                    }
-                });
-                unmappedJson.forEach((row, idx) => {
-                    const val = row[config];
-                    if (val !== undefined && val !== null) {
-                        const cleanVal = String(val).trim().toLowerCase();
-                        const matchedId = idMap.get(cleanVal);
-                        autoMap.set(idx, matchedId || null);
-                    } else {
-                        autoMap.set(idx, null);
-                    }
-                });
-            }
 
-            setSelectedIdentityColumns(usedCols);
-            setInitialAutoMapping(autoMap);
-            setCurrentStep('map_employees');
-            setTimeout(() => {
+                setSelectedIdentityColumns(usedCols);
+                setInitialAutoMapping(autoMap);
+                setCurrentStep('map_employees');
                 setIsLoading(false);
                 setShowLoadingBar(false);
-            }, 100);
+            }, 50);
+            return;
+        }
+
+        // Methods 'ID' and 'API_ID'
+        const idCol = typeof config === 'string' ? config : (config?.idColumn || '');
+        const nameOption = typeof config === 'object' && config?.nameOption ? config.nameOption : 'IGNORE';
+        const nameCol1 = config?.nameCol1 || '';
+        const nameCol2 = config?.nameCol2 || '';
+
+        // Check if Scenario A (Names mapped) or Scenario B (Names set to "Ignore, names not available in the file")
+        if (nameOption !== 'IGNORE') {
+            // SCENARIO A: Method is "Salary Identifier" or "Planday Employee ID" AND Names are Mapped
+            // Cross-check validation step:
+            // Compare Expected Employee Name vs Uploaded Name using loose/fuzzy matching.
+            const foundDiscrepancies: DiscrepancyItem[] = [];
+
+            unmappedJson.forEach((row, idx) => {
+                const rawId = row[idCol];
+                if (rawId === undefined || rawId === null || String(rawId).trim() === '') {
+                    return; // skip rows without an ID
+                }
+                const cleanId = String(rawId).trim();
+
+                let emp: Employee | undefined;
+                if (method === 'API_ID') {
+                    emp = allEmployees.find(e => String(e.id).trim().toLowerCase() === cleanId.toLowerCase());
+                } else {
+                    emp = allEmployees.find(e => e.salaryIdentifier && String(e.salaryIdentifier).trim().toLowerCase() === cleanId.toLowerCase());
+                }
+
+                const expectedName = emp ? `${emp.firstName || ''} ${emp.lastName || ''}`.trim() : '';
+
+                let uploadedName = '';
+                if (nameOption === 'SPLIT') {
+                    const first = row[nameCol1] || '';
+                    const last = row[nameCol2] || '';
+                    uploadedName = `${first} ${last}`.trim();
+                } else if (nameOption === 'SINGLE') {
+                    uploadedName = String(row[nameCol1] || '').trim();
+                }
+
+                if (uploadedName || expectedName) {
+                    const isMatch = emp ? isLooseFuzzyNameMatch(expectedName, uploadedName) : false;
+                    if (!isMatch) {
+                        foundDiscrepancies.push({
+                            rowIndex: idx,
+                            rowNumber: idx + 2,
+                            idValue: cleanId,
+                            idField: idCol,
+                            idMethod: method,
+                            expectedEmployeeId: emp?.id,
+                            expectedName: expectedName || "(No employee found in Planday with this ID)",
+                            uploadedName: uploadedName || "(No name provided in file row)"
+                        });
+                    }
+                }
+            });
+
+            if (foundDiscrepancies.length > 0) {
+                // Flag that row as a "Discrepancy" and halt the import.
+                // Display a "Review Discrepancies" modal or screen to the user.
+                setDiscrepancies(foundDiscrepancies);
+                setPendingIdConfig({
+                    method,
+                    idCol,
+                    nameOption,
+                    nameCol1,
+                    nameCol2
+                });
+                setShowDiscrepancyModal(true);
+                setIsLoading(false);
+                setShowLoadingBar(false);
+                return;
+            }
+        }
+
+        // Scenario B (Names ignored) OR Scenario A with 0 discrepancies:
+        proceedWithIdImport(method, idCol, nameOption, nameCol1, nameCol2);
+    };
+
+    const proceedWithIdImport = (
+        method: 'ID' | 'API_ID', 
+        idCol: string, 
+        nameOption?: string, 
+        nameCol1?: string, 
+        nameCol2?: string
+    ) => {
+        setIsLoading(true);
+        setShowLoadingBar(true);
+        setLoadingText("Matching employees by ID...");
+
+        setTimeout(() => {
+            const autoMap = new Map<number, number | null>();
+            const matchedEmpIds = new Set<number>();
+            const usedCols: string[] = [idCol];
+
+            if (nameOption === 'SPLIT') {
+                if (nameCol1 && !usedCols.includes(nameCol1)) usedCols.push(nameCol1);
+                if (nameCol2 && !usedCols.includes(nameCol2)) usedCols.push(nameCol2);
+            } else if (nameOption === 'SINGLE') {
+                if (nameCol1 && !usedCols.includes(nameCol1)) usedCols.push(nameCol1);
+            }
+
+            ['Planday Employee ID', 'First Name', 'Last Name', 'Salary Identifier (Payroll ID)'].forEach(c => {
+                if (!usedCols.includes(c)) usedCols.push(c);
+            });
+
+            unmappedJson.forEach((row, idx) => {
+                const val = row[idCol];
+                if (val !== undefined && val !== null) {
+                    const cleanVal = String(val).trim().toLowerCase();
+                    let emp: Employee | undefined;
+                    if (method === 'API_ID') {
+                        emp = allEmployees.find(e => String(e.id).trim().toLowerCase() === cleanVal);
+                    } else {
+                        emp = allEmployees.find(e => e.salaryIdentifier && String(e.salaryIdentifier).trim().toLowerCase() === cleanVal);
+                    }
+                    if (emp && !matchedEmpIds.has(emp.id)) {
+                        autoMap.set(idx, emp.id);
+                        matchedEmpIds.add(emp.id);
+                    } else {
+                        autoMap.set(idx, emp ? emp.id : null);
+                    }
+                } else {
+                    autoMap.set(idx, null);
+                }
+            });
+
+            setSelectedIdentityColumns(usedCols);
+            setEmployeeMapping(autoMap);
+            setInitialAutoMapping(autoMap);
+
+            const unmappedCount = Array.from(autoMap.values()).filter(v => v === null).length;
+            if (unmappedCount > 0) {
+                // Some IDs were not found in Planday; allow user to review unmapped rows
+                setCurrentStep('map_employees');
+            } else {
+                // All rows successfully matched by ID, proceed straight to field mapping
+                setCurrentStep('map_fields');
+            }
+
+            setIsLoading(false);
+            setShowLoadingBar(false);
         }, 50);
+    };
+
+    const handleCancelUploadNew = () => {
+        setShowDiscrepancyModal(false);
+        setDiscrepancies([]);
+        setIgnoredDiscrepancies(false);
+        setPendingIdConfig(null);
+        setUnmappedJson([]);
+        setRawFileJson(null);
+        setEmployeeMapping(new Map());
+        setInitialAutoMapping(new Map());
+        setFieldMapping(new Map());
+        setCurrentStep('upload');
+    };
+
+    const handleIgnoreDiscrepanciesAndProceed = () => {
+        setShowDiscrepancyModal(false);
+        setIgnoredDiscrepancies(true);
+        if (pendingIdConfig) {
+            proceedWithIdImport(
+                pendingIdConfig.method,
+                pendingIdConfig.idCol,
+                pendingIdConfig.nameOption,
+                pendingIdConfig.nameCol1,
+                pendingIdConfig.nameCol2
+            );
+        }
     };
 
     const handleEmployeeMappingComplete = (mapping: Map<number, number>) => {
@@ -5295,22 +5965,47 @@ const App: React.FC = () => {
         handleBulkUpdateErrorValues([{ rawRowIndex, fullKey, newValue }]);
     };
 
-    const handleWageTypeSelectionsComplete = (selections: Map<string, string>, overwrite: boolean, validFromDate: string) => {
-        if (!rawFileJson) return;
+    const handleWageTypeSelectionsComplete = (selections: Map<string, string>, overwrite: boolean, validFromDate: string, isDefaultGroupWage: boolean = false) => {
+        if (!rawFileJson || !definitions) return;
         const newJson = rawFileJson.map(row => {
             const newRow = { ...row };
             missingWageTypeGroups.forEach(group => {
                 const rateKey = `UPDATE - Group Rate - ${group}`;
                 if (newRow[rateKey] && String(newRow[rateKey]).trim() && String(newRow[rateKey]).trim() !== 'REMOVE') {
-                    const existingType = String(newRow[`UPDATE - Group Wage Type - ${group}`] || '').trim();
-                    const existingDate = String(newRow[`UPDATE - Group Valid From - ${group}`] || '').trim();
-                    if (validFromDate && (overwrite || !existingDate)) {
-                        newRow[`UPDATE - Group Valid From - ${group}`] = validFromDate;
-                    }
-                    if (overwrite || !existingType) {
-                        const sel = selections.get(group);
-                        if (sel) {
-                            newRow[`UPDATE - Group Wage Type - ${group}`] = sel;
+                    if (isDefaultGroupWage) {
+                        const matchingGroup = definitions.employeeGroups.find(g => g.name.trim().toLowerCase() === group.toLowerCase());
+                        const defaultRate = matchingGroup ? definitions.defaultGroupRates?.find(d => d.employeeGroupId === matchingGroup.id) : null;
+
+                        if (defaultRate) {
+                            const wageType = defaultRate.defaultWageType || 'HourlyRate';
+                            const rateVal = wageType === 'HourlyRate' ? defaultRate.hourlyRate : defaultRate.shiftRate;
+                            newRow[rateKey] = rateVal;
+                            newRow[`UPDATE - Group Wage Type - ${group}`] = wageType;
+                            if (defaultRate.salaryCode) {
+                                newRow[`UPDATE - Group Salary Code - ${group}`] = defaultRate.salaryCode;
+                            }
+                        } else {
+                            newRow[`UPDATE - Group - ${group}`] = 'x';
+                            delete newRow[rateKey];
+                        }
+
+                        const existingDate = String(newRow[`UPDATE - Group Valid From - ${group}`] || '').trim();
+                        if (validFromDate && (overwrite || !existingDate)) {
+                            newRow[`UPDATE - Group Valid From - ${group}`] = validFromDate;
+                        } else if (!existingDate) {
+                            newRow[`UPDATE - Group Valid From - ${group}`] = getTodayYYYYMMDD();
+                        }
+                    } else {
+                        const existingType = String(newRow[`UPDATE - Group Wage Type - ${group}`] || '').trim();
+                        const existingDate = String(newRow[`UPDATE - Group Valid From - ${group}`] || '').trim();
+                        if (validFromDate && (overwrite || !existingDate)) {
+                            newRow[`UPDATE - Group Valid From - ${group}`] = validFromDate;
+                        }
+                        if (overwrite || !existingType) {
+                            const sel = selections.get(group);
+                            if (sel) {
+                                newRow[`UPDATE - Group Wage Type - ${group}`] = sel;
+                            }
                         }
                     }
                 }
@@ -5429,6 +6124,13 @@ const App: React.FC = () => {
                         const targetKey = mapping.get(header);
                         if (targetKey && targetKey !== 'IDENTITY_IGNORE' && targetKey !== 'ALL_DEPARTMENTS' && targetKey !== 'ALL_DEPARTMENTS_ADD_REMOVE' && targetKey !== 'ALL_EMPLOYEE_GROUPS' && targetKey !== 'ALL_EMPLOYEE_GROUPS_RATES' && targetKey !== 'ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM' && targetKey !== 'ALL_WAGE_SALARY_VALID_FROM') {
                             newRow[targetKey] = row[header];
+                        }
+                    });
+
+                    // Carry over any existing UPDATE - columns from the file (e.g. from dedicated update template)
+                    Object.keys(row).forEach(k => {
+                        if (k.startsWith('UPDATE - ') && newRow[k] === undefined && row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
+                            newRow[k] = row[k];
                         }
                     });
 
@@ -5570,6 +6272,7 @@ const App: React.FC = () => {
             setValidationSource('upload');
             setCurrentStep('validation_errors');
             setIsLoading(false);
+            setShowLoadingBar(false);
             return;
         }
 
@@ -6214,18 +6917,19 @@ const App: React.FC = () => {
     const processRows = async (json: any[], dateResolutions: AmbiguousDateItem[], isUSFormat: boolean, refetch: boolean = false, isInitialProcessing: boolean = false) => {
         if (!definitions) return;
 
-        if (refetch) {
-            setIsLoading(true);
-            setLoadingText("Fetching latest employee data...");
-            try {
-                const latestEmployees = await fetchEmployees();
-                setAllEmployees(latestEmployees);
-            } catch (e) {
-                console.error("Failed to re-fetch employees", e);
+        try {
+            if (refetch) {
+                setIsLoading(true);
+                setLoadingText("Fetching latest employee data...");
+                try {
+                    const latestEmployees = await fetchEmployees();
+                    setAllEmployees(latestEmployees);
+                } catch (e) {
+                    console.error("Failed to re-fetch employees", e);
+                }
             }
-        }
 
-        setLoadingText("Processing data...");
+            setLoadingText("Processing data...");
 
         const deptMap = new Map<string, number>(definitions.departments.map(d => [d.name.trim().toLowerCase(), d.id] as [string, number]));
         const groupMap = new Map<string, number>(definitions.employeeGroups.map(g => [g.name.trim().toLowerCase(), g.id] as [string, number]));
@@ -6567,6 +7271,11 @@ const App: React.FC = () => {
         }
         setSelectedReviewIds(new Set(parsedReviews.map(r => r.employeeId)));
         setCurrentStep('review');
+        } finally {
+            setIsLoading(false);
+            setShowLoadingBar(false);
+            setLoadingText("");
+        }
     };
 
     const processEmployeeUpdate = async (item: EmployeeUpdateReview): Promise<EmployeeUpdateReview> => {
@@ -7020,6 +7729,8 @@ const App: React.FC = () => {
         if (rawFileJson) {
             processRows(rawFileJson, ambiguousDates, detectedUSFormat, false);
         }
+        setIsLoading(false);
+        setShowLoadingBar(false);
         setCurrentStep('review');
     };
 
@@ -7485,7 +8196,7 @@ const App: React.FC = () => {
         setCurrentPage(1);
     }, [searchReview, filterDepartment, filterGroup, filterType]);
 
-    const getUpdateColumns = useMemo(() => {
+    const getUpdateColumns: string[] = useMemo(() => {
         const cols = new Set<string>();
         let hasFixedSalary = false;
         const groupsSeen = new Set<string>();
@@ -7753,7 +8464,11 @@ const App: React.FC = () => {
                 if (!hasIssues) return false;
             }
 
-            if (searchReview && !r.employeeName.toLowerCase().includes(searchReview.toLowerCase())) return false;
+            if (searchReview) {
+                const normSearch = normalizeMultilingualText(searchReview);
+                const normName = normalizeMultilingualText(r.employeeName || "");
+                if (!normName.includes(normSearch)) return false;
+            }
             
             const emp = allEmployeesMap.get(r.employeeId);
             if (emp) {
@@ -8095,9 +8810,9 @@ const App: React.FC = () => {
                     });
                     newFileJson[rowIndex] = updatedRow;
                 } else if (bulkEditField === 'UPDATE_ALL_DEPARTMENTS') {
-                    const existingCols = Array.from(getUpdateColumns).filter((col: string) => col.startsWith("UPDATE - Department - "));
+                    const existingCols: string[] = getUpdateColumns.filter(col => col.startsWith("UPDATE - Department - "));
                     const updatedRow = { ...newFileJson[rowIndex] };
-                    existingCols.forEach(col => {
+                    existingCols.forEach((col: string) => {
                         if (updatedRow[col] !== bulkEditValue) {
                             updatedRow[col] = bulkEditValue;
                             hasChanges = true;
@@ -8106,9 +8821,9 @@ const App: React.FC = () => {
                     });
                     newFileJson[rowIndex] = updatedRow;
                 } else if (bulkEditField === 'UPDATE_ALL_SKILLS') {
-                    const existingCols = Array.from(getUpdateColumns).filter((col: string) => col.startsWith("UPDATE - Skill - "));
+                    const existingCols: string[] = getUpdateColumns.filter(col => col.startsWith("UPDATE - Skill - "));
                     const updatedRow = { ...newFileJson[rowIndex] };
-                    existingCols.forEach(col => {
+                    existingCols.forEach((col: string) => {
                         if (updatedRow[col] !== bulkEditValue) {
                             updatedRow[col] = bulkEditValue;
                             hasChanges = true;
@@ -8118,7 +8833,7 @@ const App: React.FC = () => {
                     newFileJson[rowIndex] = updatedRow;
                 } else if (bulkEditField === 'UPDATE - ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM') {
                     const visibleGroups = new Set<string>();
-                    Array.from(getUpdateColumns).forEach(col => {
+                    getUpdateColumns.forEach((col: string) => {
                         if (col.startsWith('UPDATE - Group Rate - ')) visibleGroups.add(col.replace('UPDATE - Group Rate - ', ''));
                         if (col.startsWith('UPDATE - Group Wage Type - ')) visibleGroups.add(col.replace('UPDATE - Group Wage Type - ', ''));
                         if (col.startsWith('UPDATE - Group Valid From - ')) visibleGroups.add(col.replace('UPDATE - Group Valid From - ', ''));
@@ -8150,9 +8865,9 @@ const App: React.FC = () => {
     };
 
     const changeValueForOptions = useMemo(() => {
-        const options = Array.from(getUpdateColumns).map((col: string) => ({ value: col, label: col.replace("UPDATE - ", "") }));
-        const hasDepartmentColumn = Array.from(getUpdateColumns).some(col => col.startsWith('UPDATE - Department - '));
-        const hasSkillColumn = Array.from(getUpdateColumns).some(col => col.startsWith('UPDATE - Skill - '));
+        const options = getUpdateColumns.map((col: string) => ({ value: col, label: col.replace("UPDATE - ", "") }));
+        const hasDepartmentColumn = getUpdateColumns.some((col: string) => col.startsWith('UPDATE - Department - '));
+        const hasSkillColumn = getUpdateColumns.some((col: string) => col.startsWith('UPDATE - Skill - '));
 
         if (definitions && definitions.departments.length > 0 && hasDepartmentColumn) {
             options.unshift({ value: 'PRIMARY_DEPARTMENT', label: 'Primary Department' });
@@ -8166,7 +8881,7 @@ const App: React.FC = () => {
         }
 
         const visibleGroups = new Set<string>();
-        Array.from(getUpdateColumns).forEach(col => {
+        getUpdateColumns.forEach((col: string) => {
             if (col.startsWith('UPDATE - Group Rate - ')) visibleGroups.add(col.replace('UPDATE - Group Rate - ', ''));
             if (col.startsWith('UPDATE - Group Wage Type - ')) visibleGroups.add(col.replace('UPDATE - Group Wage Type - ', ''));
             if (col.startsWith('UPDATE - Group Valid From - ')) visibleGroups.add(col.replace('UPDATE - Group Valid From - ', ''));
@@ -8279,7 +8994,7 @@ const App: React.FC = () => {
                 </div>
 
                 <main className="max-w-7xl mx-auto w-full relative">
-                    {showLoadingBar && ['identity_method', 'map_employees', 'map_fields', 'resolve_dates', 'review', 'wage_type_selection', 'configure', 'upload'].includes(currentStep) && (
+                    {isLoading && showLoadingBar && ['identity_method', 'map_employees', 'map_fields', 'resolve_dates', 'review', 'wage_type_selection', 'configure', 'upload'].includes(currentStep) && (
                         <div className="fixed bottom-0 left-0 right-0 z-[100] bg-blue-600 text-white px-6 py-4 shadow-lg flex flex-col md:flex-row items-center justify-center gap-2 md:gap-4">
                             <div className="flex items-center space-x-4">
                                 <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -8716,6 +9431,7 @@ const App: React.FC = () => {
                     {currentStep === 'wage_type_selection' && (
                         <WageTypeSelection isLoading={isLoading} 
                             missingGroups={missingWageTypeGroups}
+                            canSetDefaultWage={!Array.from(fieldMapping.values()).includes('ALL_EMPLOYEE_GROUPS_RATES')}
                             hasExistingWageTypes={
                                 rawFileJson ? rawFileJson.some(row => 
                                     missingWageTypeGroups.some(group => {
@@ -8749,6 +9465,8 @@ const App: React.FC = () => {
                             errors={validationErrors}
                             validationSource={validationSource}
                             onBack={() => {
+                                setIsLoading(false);
+                                setShowLoadingBar(false);
                                 if (validationSource === 'review') {
                                     setCurrentStep('review');
                                 } else if (updateMethod === 'editor') {
@@ -8914,6 +9632,7 @@ const App: React.FC = () => {
                                                     return (
                                                         <input 
                                                             type="text" 
+                                                            dir="auto"
                                                             className="w-full h-[38px] px-3 text-sm border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 transition-colors" 
                                                             placeholder="Value to apply..." 
                                                             value={bulkEditValue} 
@@ -8955,6 +9674,11 @@ const App: React.FC = () => {
                                                 </div>
                                             </div>
                                         </div>
+                                        {bulkEditField === 'UPDATE - ALL_EMPLOYEE_GROUPS_RATES_VALID_FROM' && (
+                                            <div className="mt-3 p-3 bg-yellow-50 text-yellow-800 border border-yellow-200 rounded text-sm">
+                                                <strong>Warning:</strong> Applying this will override all previously entered valid from dates for all groups on the selected employees.
+                                            </div>
+                                        )}
                                     </div>
                                     
                                     <div className="space-y-4">
@@ -8977,6 +9701,7 @@ const App: React.FC = () => {
                                                 <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Search Name</label>
                                                 <input 
                                                     type="text" 
+                                                    dir="auto"
                                                     className="w-full text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" 
                                                     placeholder="Search employees..." 
                                                     value={searchReview} 
@@ -9445,30 +10170,6 @@ const App: React.FC = () => {
 
                 </main>
                 
-                <ConfirmModal
-                    isOpen={showDeptActionPrompt}
-                    onClose={() => setShowDeptActionPrompt(false)}
-                    title="Department Action"
-                    message="You have mapped 'All Departments', but not specified whether to add or remove them. Do you want to Add (x) or Remove these departments?"
-                    confirmText="Add (x)"
-                    cancelText="Cancel"
-                    onConfirm={() => {
-                        setDepartmentAddRemoveAction('x');
-                        setShowDeptActionPrompt(false);
-                        if (pendingMapping) {
-                            processMapping(pendingMapping, 'x');
-                        }
-                    }}
-                    secondaryConfirmAction={() => {
-                        setDepartmentAddRemoveAction('REMOVE');
-                        setShowDeptActionPrompt(false);
-                        if (pendingMapping) {
-                            processMapping(pendingMapping, 'REMOVE');
-                        }
-                    }}
-                    secondaryConfirmText="Remove"
-                />
-
                 <ConfirmModal 
                     isOpen={showConfirmModal}
                     onClose={() => setShowConfirmModal(false)}
@@ -9610,6 +10311,13 @@ const App: React.FC = () => {
             <HelpModal 
                 isOpen={showHelpModal} 
                 onClose={() => setShowHelpModal(false)}
+            />
+
+            <ReviewDiscrepanciesModal 
+                isOpen={showDiscrepancyModal}
+                discrepancies={discrepancies}
+                onCancelUploadNew={handleCancelUploadNew}
+                onIgnoreAndProceed={handleIgnoreDiscrepanciesAndProceed}
             />
             {/* Stop Confirmation Modal */}
             {isStopModalOpen && (
