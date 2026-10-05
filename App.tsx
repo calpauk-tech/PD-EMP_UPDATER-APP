@@ -6741,7 +6741,7 @@ const App: React.FC = () => {
 
                 // Group Rate
                 else if (lowerHeader.startsWith('group rate - ')) {
-                    if (!isRemove && !/^\d+([.,]\d+)?$/.test(val)) {
+                    if (!isRemove && lowerVal !== 'x' && !/^\d+([.,]\d+)?$/.test(val)) {
                         errors.push({
                             rawRowIndex: rowIndex,
                             fullKey: key,
@@ -6749,7 +6749,7 @@ const App: React.FC = () => {
                             employeeName: empName,
                             field: headerName,
                             value: val,
-                            allowed: ['Numeric wage rate without currency (e.g. 15 or 15.50)']
+                            allowed: ['x, 0, or numeric wage rate (e.g. 15 or 15.50)']
                         });
                     }
                 }
@@ -7000,7 +7000,8 @@ const App: React.FC = () => {
                     const codeHeader = `UPDATE - Group Salary Code - ${g.name.trim()}`;
 
                     if (row[rateHeader] !== undefined && row[rateHeader] !== null && String(row[rateHeader]).trim() !== "") {
-                        const rateVal = parseDecimal(row[rateHeader]);
+                        const rawRateStr = String(row[rateHeader]).trim();
+                        const rateVal = rawRateStr.toLowerCase() === 'x' ? 0 : parseDecimal(rawRateStr);
                         const wageTypeRaw = String(row[wageHeader] || 'HourlyRate').trim();
                         const wageType = wageTypeRaw.toLowerCase().includes('shift') ? 'ShiftRate' : 'HourlyRate';
                         
