@@ -3996,14 +3996,16 @@ const EditableCell = React.memo(({
     };
 
     if (isSelect) {
-        const isInvalidValue = draftValue && options && !options.some(o => o.toLowerCase() === String(draftValue).toLowerCase());
+        const matchingOpt = options?.find(o => o.toLowerCase() === String(draftValue).toLowerCase());
+        const selectValue = matchingOpt !== undefined ? matchingOpt : draftValue;
+        const isInvalidValue = draftValue && options && !matchingOpt;
 
         return (
             <div className="relative group/cell" ref={cellRef} onMouseEnter={() => setIsHovered(true)} onMouseLeave={() => setIsHovered(false)}>
                 <select
                     dir="auto"
                     className={`w-full min-w-[100px] bg-white border ${isFormatError ? 'border-red-600 bg-red-100 focus:ring-red-600 focus:border-red-600 outline-none ring-1 ring-red-600 text-red-900' : 'border-gray-300 shadow-sm hover:border-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500'} rounded px-3 py-1.5 transition-colors text-gray-900`}
-                    value={draftValue}
+                    value={selectValue}
                     onFocus={() => {
                         setFocusedCol(col);
                         onCellFocus(employeeId, col);
@@ -5950,7 +5952,19 @@ const App: React.FC = () => {
             if (!prev) return prev;
             const newJson = [...prev];
             updates.forEach(u => {
-                newJson[u.rawRowIndex] = { ...newJson[u.rawRowIndex], [u.fullKey]: u.newValue };
+                let valToSet = u.newValue;
+                const lowerKey = u.fullKey.trim().toLowerCase();
+                if (lowerKey === 'update - mobile' && u.newValue.toUpperCase() !== 'REMOVE' && u.newValue.toUpperCase() !== 'DELETE') {
+                    valToSet = u.newValue.replace(/\s+/g, '');
+                } else if (lowerKey.startsWith('update - department - ')) {
+                    const lowerVal = u.newValue.trim().toLowerCase();
+                    if (lowerVal === 'x' || lowerVal === 'xx') {
+                        valToSet = lowerVal;
+                    } else if (u.newValue.trim().toUpperCase() === 'REMOVE') {
+                        valToSet = 'REMOVE';
+                    }
+                }
+                newJson[u.rawRowIndex] = { ...newJson[u.rawRowIndex], [u.fullKey]: valToSet };
             });
             return newJson;
         });
@@ -6082,7 +6096,7 @@ const App: React.FC = () => {
                             const deptNames = val.split(/[,;]/).map(d => d.trim()).filter(Boolean);
                             
                             // Find the value from ALL_DEPARTMENTS_ADD_REMOVE if mapped
-                            let actionValue = deptAction || "x"; // default to global or 'x'
+                            let actionValue = deptAction ? (deptAction.toLowerCase() === 'xx' ? 'xx' : (deptAction.toUpperCase() === 'REMOVE' ? 'REMOVE' : 'x')) : "x"; // default to global or 'x'
                             
                             // Find which header maps to ALL_DEPARTMENTS_ADD_REMOVE
                             let addRemoveHeader = null;
@@ -6093,17 +6107,26 @@ const App: React.FC = () => {
                                 }
                             }
                             
-                                                        if (addRemoveHeader) {
+                            if (addRemoveHeader) {
                                 const rowVal = String(row[addRemoveHeader] || '').trim();
-                                if (rowVal.toLowerCase() === 'x' || rowVal.toUpperCase() === 'REMOVE') {
-                                    actionValue = rowVal;
+                                const rowValLower = rowVal.toLowerCase();
+                                if (rowValLower === 'x' || rowValLower === 'xx' || rowVal.toUpperCase() === 'REMOVE') {
+                                    actionValue = rowValLower === 'xx' ? 'xx' : (rowVal.toUpperCase() === 'REMOVE' ? 'REMOVE' : 'x');
                                 }
                             }
                             
-                            deptNames.forEach(deptName => {
-                                const matchingDept = definitions?.departments.find(d => d.name.toLowerCase() === deptName.toLowerCase());
+                            deptNames.forEach(deptStr => {
+                                let cleanDept = deptStr;
+                                let specificAction = actionValue;
+                                const match = deptStr.match(/^(.*?)\s*\((\s*(?:x{1,2}|REMOVE)\s*)\)$/i);
+                                if (match) {
+                                    cleanDept = match[1].trim();
+                                    const marker = match[2].trim().toLowerCase();
+                                    specificAction = marker === 'xx' ? 'xx' : (marker === 'remove' ? 'REMOVE' : 'x');
+                                }
+                                const matchingDept = definitions?.departments.find(d => d.name.toLowerCase() === cleanDept.toLowerCase());
                                 if (matchingDept) {
-                                    newRow[`UPDATE - Department - ${matchingDept.name.trim()}`] = actionValue;
+                                    newRow[`UPDATE - Department - ${matchingDept.name.trim()}`] = specificAction;
                                 }
                             });
                         } else if (targetKey === 'ALL_EMPLOYEE_GROUPS') {
@@ -6131,6 +6154,35 @@ const App: React.FC = () => {
                     Object.keys(row).forEach(k => {
                         if (k.startsWith('UPDATE - ') && newRow[k] === undefined && row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
                             newRow[k] = row[k];
+                        }
+                    });
+
+                    // Automatically clean spaces from mobile numbers (e.g. "83 0323166" -> "830323166")
+                    Object.keys(newRow).forEach(k => {
+                        if (k.trim().toLowerCase() === 'update - mobile') {
+                            const rawMobile = newRow[k];
+                            if (rawMobile !== undefined && rawMobile !== null) {
+                                const mobileStr = String(rawMobile).trim();
+                                if (mobileStr.toUpperCase() !== 'REMOVE' && mobileStr.toUpperCase() !== 'DELETE') {
+                                    newRow[k] = mobileStr.replace(/\s+/g, '');
+                                }
+                            }
+                        }
+                    });
+
+                    // Normalize department values: 'X' -> 'x', 'XX' -> 'xx'
+                    Object.keys(newRow).forEach(k => {
+                        if (k.toLowerCase().startsWith('update - department - ')) {
+                            const val = newRow[k];
+                            if (val !== undefined && val !== null) {
+                                const strVal = String(val).trim();
+                                const lower = strVal.toLowerCase();
+                                if (lower === 'x' || lower === 'xx') {
+                                    newRow[k] = lower;
+                                } else if (strVal.toUpperCase() === 'REMOVE') {
+                                    newRow[k] = 'REMOVE';
+                                }
+                            }
                         }
                     });
 
@@ -6756,7 +6808,8 @@ const App: React.FC = () => {
 
                 // Mobile validation
                 else if (lowerHeader === 'mobile') {
-                    if (!isRemove && !/^\d+$/.test(val)) {
+                    const cleanedVal = val.replace(/\s+/g, '');
+                    if (!isRemove && !/^\d+$/.test(cleanedVal)) {
                         errors.push({
                             rawRowIndex: rowIndex,
                             fullKey: key,
@@ -6764,7 +6817,7 @@ const App: React.FC = () => {
                             employeeName: empName,
                             field: 'Mobile',
                             value: val,
-                            allowed: ['Digits only, without area code (no +45 or spaces)']
+                            allowed: ['Digits only, without area code (no +45)']
                         });
                     }
                 }
@@ -7057,7 +7110,11 @@ const App: React.FC = () => {
                 else if (lowerHeader === 'zip') { mainPayload.zip = isDelete ? "" : val; review.changes.push(`Zip -> ${isDelete ? 'REMOVE' : val}`); }
                 else if (lowerHeader === 'city') { mainPayload.city = isDelete ? "" : val; review.changes.push(`City -> ${isDelete ? 'REMOVE' : val}`); }
                 else if (lowerHeader === 'country code') { mainPayload.cellPhoneCountryCode = isDelete ? "" : val; review.changes.push(`Country Code -> ${isDelete ? 'REMOVE' : val}`); }
-                else if (lowerHeader === 'mobile') { mainPayload.cellPhone = isDelete ? "" : val; review.changes.push(`Mobile -> ${isDelete ? 'REMOVE' : val}`); }
+                else if (lowerHeader === 'mobile') { 
+                    const cleanedVal = isDelete ? "" : val.replace(/\s+/g, '');
+                    mainPayload.cellPhone = cleanedVal; 
+                    review.changes.push(`Mobile -> ${isDelete ? 'REMOVE' : cleanedVal}`); 
+                }
                 else if (lowerHeader === 'start/hired date') { 
                     mainPayload.hiredFrom = isDelete ? null : parseAndLogDate(rawVal, headerName, key); 
                     review.changes.push(`Start Date -> ${isDelete ? 'REMOVE' : (mainPayload.hiredFrom || val)}`); 
@@ -8507,7 +8564,19 @@ const App: React.FC = () => {
         const newFileJson = JSON.parse(JSON.stringify(rawFileJson));
         const rowIndex = newFileJson.findIndex((r: any) => parseInt(r["Planday Employee ID"]) === employeeId);
         if (rowIndex > -1) {
-            newFileJson[rowIndex] = { ...newFileJson[rowIndex], [colKey]: newValue };
+            let valToSet = newValue;
+            const lowerKey = colKey.trim().toLowerCase();
+            if (lowerKey === 'update - mobile' && newValue.toUpperCase() !== 'REMOVE' && newValue.toUpperCase() !== 'DELETE') {
+                valToSet = newValue.replace(/\s+/g, '');
+            } else if (lowerKey.startsWith('update - department - ')) {
+                const lowerVal = newValue.trim().toLowerCase();
+                if (lowerVal === 'x' || lowerVal === 'xx') {
+                    valToSet = lowerVal;
+                } else if (newValue.trim().toUpperCase() === 'REMOVE') {
+                    valToSet = 'REMOVE';
+                }
+            }
+            newFileJson[rowIndex] = { ...newFileJson[rowIndex], [colKey]: valToSet };
             recordChange(newFileJson, explicitAddedCols);
         }
     };
@@ -8791,7 +8860,7 @@ const App: React.FC = () => {
 
                     const updatedRow = { ...newFileJson[rowIndex] };
                     existingDeptCols.forEach(col => {
-                        const currVal = updatedRow[col];
+                        const currVal = String(updatedRow[col] || '').trim().toLowerCase();
                         if (bulkEditValue === 'REMOVE_PRIMARY') {
                             if (currVal === 'xx') {
                                 updatedRow[col] = 'x';
@@ -8813,9 +8882,11 @@ const App: React.FC = () => {
                 } else if (bulkEditField === 'UPDATE_ALL_DEPARTMENTS') {
                     const existingCols: string[] = getUpdateColumns.filter(col => col.startsWith("UPDATE - Department - "));
                     const updatedRow = { ...newFileJson[rowIndex] };
+                    const lowerBulk = bulkEditValue.trim().toLowerCase();
+                    const normalizedBulkVal = (lowerBulk === 'x' || lowerBulk === 'xx') ? lowerBulk : bulkEditValue;
                     existingCols.forEach((col: string) => {
-                        if (updatedRow[col] !== bulkEditValue) {
-                            updatedRow[col] = bulkEditValue;
+                        if (updatedRow[col] !== normalizedBulkVal) {
+                            updatedRow[col] = normalizedBulkVal;
                             hasChanges = true;
                             newExplicit.add(col);
                         }
@@ -8852,8 +8923,11 @@ const App: React.FC = () => {
                     });
                     newFileJson[rowIndex] = updatedRow;
                 } else {
-                    if (newFileJson[rowIndex][bulkEditField] !== bulkEditValue) {
-                        newFileJson[rowIndex] = { ...row, [bulkEditField]: bulkEditValue };
+                    const finalVal = (bulkEditField.trim().toLowerCase() === 'update - mobile' && bulkEditValue.toUpperCase() !== 'REMOVE' && bulkEditValue.toUpperCase() !== 'DELETE')
+                        ? bulkEditValue.replace(/\s+/g, '')
+                        : bulkEditValue;
+                    if (newFileJson[rowIndex][bulkEditField] !== finalVal) {
+                        newFileJson[rowIndex] = { ...row, [bulkEditField]: finalVal };
                         hasChanges = true;
                     }
                 }
@@ -10274,6 +10348,13 @@ const App: React.FC = () => {
                                 <div>
                                     <span className="block font-semibold">Add (x)</span>
                                     <span className="block text-sm text-gray-500">Add the employee to these departments</span>
+                                </div>
+                            </label>
+                            <label className="flex items-start gap-3 p-3 border rounded-lg hover:bg-gray-50 cursor-pointer">
+                                <input type="radio" name="deptAction" value="xx" className="mt-1" checked={globalDeptAction === 'xx'} onChange={() => setGlobalDeptAction('xx')} />
+                                <div>
+                                    <span className="block font-semibold">Set as Primary (xx)</span>
+                                    <span className="block text-sm text-gray-500">Set the employee's primary department to this department</span>
                                 </div>
                             </label>
                             <label className="flex items-start gap-3 p-3 border rounded-lg hover:bg-gray-50 cursor-pointer">
