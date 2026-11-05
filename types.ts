@@ -10,11 +10,13 @@ export interface Employee {
   firstName: string;
   lastName: string;
   email?: string;
+  userName?: string;
   departmentIds?: number[];
   employeeGroupIds?: number[];
   salaryIdentifier?: string | null;
   employeeTypeId?: number;
 }
+
 
 export interface IdName {
     id: number;
@@ -141,7 +143,7 @@ export interface DiscrepancyItem {
     rowNumber: number;
     idValue: string;
     idField: string;
-    idMethod: 'ID' | 'API_ID';
+    idMethod: 'ID' | 'API_ID' | 'USERNAME';
     expectedEmployeeId?: number;
     expectedName: string;
     uploadedName: string;

@@ -201,6 +201,7 @@ const CloudUploadIcon: React.FC<{ className?: string }> = ({ className }) => (<s
 const UserGroupIcon: React.FC<{ className?: string }> = ({ className }) => (<svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>);
 const BadgeIdIcon: React.FC<{ className?: string }> = ({ className }) => (<svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0c0 .884-.5 1.5-1 1.5a1 1 0 01-1-1.5zm0 0c0 .884.5 1.5 1 1.5a1 1 0 001-1.5" /></svg>);
 const ArrowRightIcon: React.FC<{ className?: string }> = ({ className }) => (<svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>);
+const MailIcon: React.FC<{ className?: string }> = ({ className }) => (<svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>);
 
 
 // --- UI Components ---
@@ -363,7 +364,7 @@ const ReviewDiscrepanciesModal: React.FC<{
                                 </span>
                             </div>
                             <p className="text-sm text-red-800 mt-1">
-                                Employee ID mismatch detected in your uploaded file.
+                                Employee identity mismatch detected in your uploaded file.
                             </p>
                         </div>
                     </div>
@@ -373,7 +374,7 @@ const ReviewDiscrepanciesModal: React.FC<{
                 <div className="px-6 pt-4">
                     <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-900 leading-relaxed">
                         <strong className="font-semibold block mb-0.5">⚠️ Why did this happen?</strong>
-                        The employee ID on the rows below belongs to a different employee than the name in your sheet. 
+                        The employee ID or Username on the rows below belongs to a different employee than the name in your sheet. 
                         This commonly occurs when rows in a spreadsheet accidentally shifted (e.g. deleting or inserting a cell in one column).
                     </div>
                 </div>
@@ -401,7 +402,7 @@ const ReviewDiscrepanciesModal: React.FC<{
                                     Row {d.rowNumber}
                                 </span>
                                 <span className="leading-snug">
-                                    Row {d.rowNumber}: ID <code className="bg-white border px-1.5 py-0.5 rounded font-bold text-gray-800 font-mono">{d.idValue}</code> belongs to <strong className="text-green-700 font-bold">{d.expectedName}</strong>, but your file says <strong className="text-red-700 font-bold underline decoration-red-400">{d.uploadedName}</strong>
+                                    Row {d.rowNumber}: {d.idMethod === 'USERNAME' ? 'Username' : 'ID'} <code className="bg-white border px-1.5 py-0.5 rounded font-bold text-gray-800 font-mono">{d.idValue}</code> belongs to <strong className="text-green-700 font-bold">{d.expectedName}</strong>, but your file says <strong className="text-red-700 font-bold underline decoration-red-400">{d.uploadedName}</strong>
                                 </span>
                             </div>
 
@@ -1835,16 +1836,17 @@ const WageTypeSelection: React.FC<WageTypeSelectionProps> = ({ missingGroups, ha
 interface IdentitySelectorProps {
     isLoading?: boolean;
     headers: string[];
-    onNext: (method: 'NAME' | 'ID' | 'API_ID', config?: any) => void;
+    onNext: (method: 'NAME' | 'ID' | 'API_ID' | 'USERNAME', config?: any) => void;
     onBack: () => void;
 }
 
 const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, onBack, isLoading }) => {
-    const [method, setMethod] = useState<'NAME' | 'ID' | 'API_ID'>('ID');
+    const [method, setMethod] = useState<'NAME' | 'ID' | 'API_ID' | 'USERNAME'>('ID');
     const [selectedColumn, setSelectedColumn] = useState('');
     const [selectedApiIdColumn, setSelectedApiIdColumn] = useState('');
+    const [selectedUsernameColumn, setSelectedUsernameColumn] = useState('');
     
-    // Name configuration for ID & API_ID methods (Scenario A & B)
+    // Name configuration for ID, API_ID & USERNAME methods (Scenario A & B)
     const [nameOption, setNameOption] = useState<'SPLIT' | 'SINGLE' | 'IGNORE'>('SPLIT');
     const [idNameCol1, setIdNameCol1] = useState(''); // First Name OR Full Name
     const [idNameCol2, setIdNameCol2] = useState(''); // Last Name
@@ -1862,10 +1864,15 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
 
         const plandayIdCol = headers.find(h => /^(planday\s*employee\s*id|employee\s*id)$/i.test(h.trim()));
         const salaryIdCol = headers.find(h => /^(salary\s*identifier(\s*\(payroll\s*id\))?|payroll\s*id|salary\s*id)$/i.test(h.trim()));
+        const usernameCol = headers.find(h => /^(username|user\s*name|email|e-mail|brugernavn|användarnamn|benutzername)$/i.test(h.trim()));
 
         const fnCol = headers.find(h => /^(first\s*name|firstname|fornavn|förnamn|vorname)$/i.test(h.trim()));
         const lnCol = headers.find(h => /^(last\s*name|lastname|efternavn|efternamn|nachname|surname)$/i.test(h.trim()));
         const fullNameCol = headers.find(h => /^(full\s*name|fullname|name|navn|namn|employee\s*name|employee)$/i.test(h.trim()));
+
+        if (usernameCol) {
+            setSelectedUsernameColumn(usernameCol);
+        }
 
         // Method detection:
         if (plandayIdCol) {
@@ -1874,6 +1881,9 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
         } else if (salaryIdCol) {
             setMethod('ID');
             setSelectedColumn(salaryIdCol);
+        } else if (usernameCol) {
+            setMethod('USERNAME');
+            setSelectedUsernameColumn(usernameCol);
         } else if (fnCol || fullNameCol) {
             setMethod('NAME');
         } else {
@@ -1918,6 +1928,12 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
             if (nameOption === 'SINGLE' && !idNameCol1) return true;
             return false;
         }
+        if (method === 'USERNAME') {
+            if (!selectedUsernameColumn) return true;
+            if (nameOption === 'SPLIT' && (!idNameCol1 || !idNameCol2)) return true;
+            if (nameOption === 'SINGLE' && !idNameCol1) return true;
+            return false;
+        }
         if (method === 'NAME') {
             if (nameMode === 'SINGLE' && !nameCol1) return true;
             if (nameMode === 'SPLIT' && (!nameCol1 || !nameCol2)) return true;
@@ -1937,6 +1953,13 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
         } else if (method === 'API_ID') {
             onNext('API_ID', {
                 idColumn: selectedApiIdColumn,
+                nameOption,
+                nameCol1: idNameCol1,
+                nameCol2: idNameCol2
+            });
+        } else if (method === 'USERNAME') {
+            onNext('USERNAME', {
+                idColumn: selectedUsernameColumn,
                 nameOption,
                 nameCol1: idNameCol1,
                 nameCol2: idNameCol2
@@ -2147,6 +2170,100 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
                  </div>
 
                  <div 
+                    className={`border rounded-lg p-4 cursor-pointer transition-all ${method === 'USERNAME' ? 'ring-2 ring-blue-500 bg-blue-50 border-blue-500' : 'border-gray-200 hover:border-gray-300'}`}
+                    onClick={() => setMethod('USERNAME')}
+                 >
+                     <div className="flex items-start gap-3">
+                         <div className={`w-5 h-5 mt-1 rounded-full border flex items-center justify-center ${method === 'USERNAME' ? 'border-blue-600' : 'border-gray-400'}`}>
+                             {method === 'USERNAME' && <div className="w-2.5 h-2.5 bg-blue-600 rounded-full" />}
+                         </div>
+                         <div className="flex-1">
+                             <div className="font-bold flex items-center gap-2">
+                                 <MailIcon className="w-5 h-5 text-gray-500"/>
+                                 Match by Username
+                             </div>
+                             <p className="text-sm text-gray-500 mt-1">Uses a specific column in your file to match against the Planday employee userName.</p>
+                             
+                             {method === 'USERNAME' && (
+                                 <div className="mt-4 bg-white p-4 rounded-lg border border-gray-200 animate-fadeIn cursor-default" onClick={e => e.stopPropagation()}>
+                                     <div className="mb-4">
+                                         <label className="block text-xs font-bold text-gray-700 mb-1">Select Column containing Username:</label>
+                                         <SearchableSelect 
+                                            options={options} 
+                                            value={selectedUsernameColumn} 
+                                            onChange={setSelectedUsernameColumn} 
+                                            placeholder="-- Select Username Column --" 
+                                         />
+                                     </div>
+
+                                     {/* Name Mapping for Cross-Check Validation */}
+                                     <div className="pt-3 border-t border-gray-100">
+                                         <div className="flex items-center justify-between mb-1.5">
+                                             <label className="block text-xs font-bold text-gray-700">
+                                                 Employee Name Mapping (for Cross-Check Validation):
+                                             </label>
+                                             <span className="text-[11px] text-gray-500 italic">Verifies Username matches name</span>
+                                         </div>
+                                         <p className="text-xs text-gray-500 mb-2.5">
+                                             Map name columns in your file to verify that Usernames align with the correct employee name.
+                                         </p>
+                                         <div className="flex flex-wrap gap-2 mb-3">
+                                             <button 
+                                                 type="button" 
+                                                 className={`px-2.5 py-1 text-xs rounded border transition-colors ${nameOption === 'SPLIT' ? 'bg-blue-100 text-blue-700 border-blue-300 font-semibold shadow-sm' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`} 
+                                                 onClick={() => setNameOption('SPLIT')}
+                                             >
+                                                 First & Last Name (Two Columns)
+                                             </button>
+                                             <button 
+                                                 type="button" 
+                                                 className={`px-2.5 py-1 text-xs rounded border transition-colors ${nameOption === 'SINGLE' ? 'bg-blue-100 text-blue-700 border-blue-300 font-semibold shadow-sm' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`} 
+                                                 onClick={() => setNameOption('SINGLE')}
+                                             >
+                                                 Full Name (Single Column)
+                                             </button>
+                                             <button 
+                                                 type="button" 
+                                                 className={`px-2.5 py-1 text-xs rounded border transition-colors ${nameOption === 'IGNORE' ? 'bg-amber-100 text-amber-800 border-amber-300 font-semibold shadow-sm' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`} 
+                                                 onClick={() => setNameOption('IGNORE')}
+                                             >
+                                                 Ignore, names not available in the file
+                                             </button>
+                                         </div>
+
+                                         {nameOption === 'SPLIT' && (
+                                             <div className="grid grid-cols-2 gap-2 animate-fadeIn">
+                                                 <div>
+                                                     <label className="block text-xs font-bold text-gray-600 mb-1">First Name Column:</label>
+                                                     <SearchableSelect options={options} value={idNameCol1} onChange={setIdNameCol1} placeholder="-- First Name Column --" />
+                                                 </div>
+                                                 <div>
+                                                     <label className="block text-xs font-bold text-gray-600 mb-1">Last Name Column:</label>
+                                                     <SearchableSelect options={options} value={idNameCol2} onChange={setIdNameCol2} placeholder="-- Last Name Column --" />
+                                                 </div>
+                                             </div>
+                                         )}
+
+                                         {nameOption === 'SINGLE' && (
+                                             <div className="animate-fadeIn">
+                                                 <label className="block text-xs font-bold text-gray-600 mb-1">Full Name Column:</label>
+                                                 <SearchableSelect options={options} value={idNameCol1} onChange={setIdNameCol1} placeholder="-- Full Name Column --" />
+                                             </div>
+                                         )}
+
+                                         {nameOption === 'IGNORE' && (
+                                             <p className="text-xs text-amber-800 bg-amber-50 p-2.5 rounded border border-amber-200 animate-fadeIn">
+                                                 ⚠️ <strong>Notice:</strong> Name cross-check will be skipped. The system will proceed with the import relying solely on the provided Usernames.
+                                             </p>
+                                         )}
+                                     </div>
+                                 </div>
+                             )}
+                         </div>
+                     </div>
+                 </div>
+
+                 <div 
                     className={`border rounded-lg p-4 cursor-pointer transition-all ${method === 'NAME' ? 'ring-2 ring-blue-500 bg-blue-50 border-blue-500' : 'border-gray-200 hover:border-gray-300'}`}
                     onClick={() => setMethod('NAME')}
                  >
@@ -2221,7 +2338,7 @@ interface EmployeeMapperProps {
     rows: any[];
     employees: Employee[];
     initialMapping?: Map<number, number | null>;
-    matchMethod?: 'NAME' | 'ID' | 'API_ID';
+    matchMethod?: 'NAME' | 'ID' | 'API_ID' | 'USERNAME';
     onComplete: (mapping: Map<number, number>) => void;
     onCancel: () => void;
     onBack: () => void;
@@ -2273,6 +2390,9 @@ const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initia
             const ln = normalizeMultilingualText(e.lastName || "");
             empMap.set(`${fn} ${ln}`.trim(), e.id);
             empMap.set(`${fn}${ln}`.trim(), e.id);
+            if (e.userName) {
+                empMap.set(normalizeMultilingualText(e.userName).trim().toLowerCase(), e.id);
+            }
         });
 
         rows.forEach((row, idx) => {
@@ -2353,7 +2473,10 @@ const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initia
             if (!searchString) return;
 
             availableOptions.forEach(opt => {
-                const score = calculateSimilarity(searchString, opt.label);
+                const emp = employees.find(e => e.id === opt.value);
+                const scoreName = calculateSimilarity(searchString, opt.label);
+                const scoreUsername = emp?.userName ? calculateSimilarity(searchString, emp.userName.toLowerCase()) : 0;
+                const score = Math.max(scoreName, scoreUsername);
                 if (score >= SIMILARITY_THRESHOLD) {
                     candidates.push({
                         rowIdx,
@@ -2404,7 +2527,10 @@ const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initia
     
     // Sort employees for dropdown
     const sortedEmployees = useMemo(() => [...employees].sort((a,b) => a.firstName.localeCompare(b.firstName)), [employees]);
-    const employeeOptions = useMemo(() => sortedEmployees.map(e => ({ value: e.id, label: `${e.firstName} ${e.lastName}` })), [sortedEmployees]);
+    const employeeOptions = useMemo(() => sortedEmployees.map(e => ({ 
+        value: e.id, 
+        label: `${e.firstName} ${e.lastName}${e.userName ? ` (${e.userName})` : ''}` 
+    })), [sortedEmployees]);
 
     // Create a set of already mapped employee IDs to show in strikethrough
     const usedEmployeeIds = useMemo(() => {
@@ -2434,7 +2560,7 @@ const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initia
                 const mappedId = mapping.get(r.index);
                 if (mappedId) {
                     const emp = employees.find(e => e.id === mappedId);
-                    if (emp && (`${emp.firstName} ${emp.lastName}`.toLowerCase().includes(sq) || (emp.email && emp.email.toLowerCase().includes(sq)))) return true;
+                    if (emp && (`${emp.firstName} ${emp.lastName}`.toLowerCase().includes(sq) || (emp.userName && emp.userName.toLowerCase().includes(sq)))) return true;
                 }
                 return false;
             });
@@ -2470,6 +2596,22 @@ const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initia
                         </div>
                     </div>
                 </div>
+            ) : matchMethod === 'USERNAME' ? (
+                <div className="bg-blue-50 border-l-4 border-blue-500 p-4 mb-6 rounded-r-lg">
+                     <div className="flex">
+                        <div className="flex-shrink-0">
+                            <MailIcon className="h-5 w-5 text-blue-500" />
+                        </div>
+                        <div className="ml-3">
+                            <h3 className="text-sm font-medium text-blue-800">
+                                Matching by Username
+                            </h3>
+                            <div className="mt-2 text-sm text-blue-700">
+                                <p>We have matched employees based on their Planday userName. Please review any unmapped rows below.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             ) : (
                 <div className="bg-blue-50 border-l-4 border-blue-500 p-4 mb-6 rounded-r-lg">
                      <div className="flex">
@@ -2478,7 +2620,7 @@ const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initia
                         </div>
                         <div className="ml-3">
                             <h3 className="text-sm font-medium text-blue-800">
-                                {rows.some(row => "Planday Employee ID" in row) ? "Matching by Planday Employee ID" : "Matching by Salary Identifier (Payroll ID)"}
+                                {matchMethod === 'API_ID' || rows.some(row => "Planday Employee ID" in row) ? "Matching by Planday Employee ID" : "Matching by Salary Identifier (Payroll ID)"}
                             </h3>
                             <div className="mt-2 text-sm text-blue-700">
                                 <p>We have matched employees based on the selected column. Please review any unmapped rows below.</p>
@@ -2489,7 +2631,11 @@ const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initia
             )}
 
             <h2 className="text-2xl font-bold mb-4">Map Employees</h2>
-            {rows.some(row => "Planday Employee ID" in row) ? (
+            {matchMethod === 'USERNAME' ? (
+                <p className="text-gray-500 mb-6">
+                    Employees have been automatically matched using their Planday userName. Please review the mapping below.
+                </p>
+            ) : rows.some(row => "Planday Employee ID" in row) ? (
                 <p className="text-gray-500 mb-6">
                     Employees have been automatically matched using their Planday Employee ID. Please review the mapping below.
                 </p>
@@ -4368,7 +4514,7 @@ const App: React.FC = () => {
     const [unmappedJson, setUnmappedJson] = useState<any[]>([]);
     const [employeeMapping, setEmployeeMapping] = useState<Map<number, number>>(new Map());
     const [initialAutoMapping, setInitialAutoMapping] = useState<Map<number, number | null>>(new Map());
-    const [selectedIdentityMethod, setSelectedIdentityMethod] = useState<'NAME' | 'ID' | 'API_ID'>('NAME');
+    const [selectedIdentityMethod, setSelectedIdentityMethod] = useState<'NAME' | 'ID' | 'API_ID' | 'USERNAME'>('NAME');
     const [selectedIdentityColumns, setSelectedIdentityColumns] = useState<string[]>([]);
     const [fieldMapping, setFieldMapping] = useState<Map<string, string>>(new Map());
     const [missingWageTypeGroups, setMissingWageTypeGroups] = useState<string[]>([]);
@@ -4378,7 +4524,7 @@ const App: React.FC = () => {
     const [showDiscrepancyModal, setShowDiscrepancyModal] = useState<boolean>(false);
     const [ignoredDiscrepancies, setIgnoredDiscrepancies] = useState<boolean>(false);
     const [pendingIdConfig, setPendingIdConfig] = useState<{
-        method: 'ID' | 'API_ID';
+        method: 'ID' | 'API_ID' | 'USERNAME';
         idCol: string;
         nameOption?: string;
         nameCol1?: string;
@@ -5556,7 +5702,7 @@ const App: React.FC = () => {
         return targets;
     };
 
-    const handleIdentityMethodSelection = (method: 'NAME' | 'ID' | 'API_ID', config?: any) => {
+    const handleIdentityMethodSelection = (method: 'NAME' | 'ID' | 'API_ID' | 'USERNAME', config?: any) => {
         setSelectedIdentityMethod(method);
 
         if (method === 'NAME') {
@@ -5603,7 +5749,7 @@ const App: React.FC = () => {
                         if (firstName && lastName) {
                             nameToMatch = `${firstName} ${lastName}`;
                         } else {
-                            const fullName = findAliasedKey(['name', 'employee', 'fullname', 'employeename', 'navn', 'namn', 'fuldenavn', 'πλήρες όνομα', 'ονοματεπώνυμο', 'фио', 'полное имя', 'сотрудник', 'الاسم', 'الاسم الكامل', 'اسم الموظف']);
+                            const fullName = findAliasedKey(['name', 'employee', 'fullname', 'employeename', 'navn', 'namn', 'fuldenavn', 'πλήρες όνομα', 'ονοματεπώνυμο', 'фиο', 'полное имя', 'сотрудник', 'الاسم', 'الاسم الكامل', 'اسم الموظف']);
                             if (fullName) {
                                 nameToMatch = fullName;
                             } else if (firstName) {
@@ -5652,7 +5798,7 @@ const App: React.FC = () => {
             return;
         }
 
-        // Methods 'ID' and 'API_ID'
+        // Methods 'ID', 'API_ID', and 'USERNAME'
         const idCol = typeof config === 'string' ? config : (config?.idColumn || '');
         const nameOption = typeof config === 'object' && config?.nameOption ? config.nameOption : 'IGNORE';
         const nameCol1 = config?.nameCol1 || '';
@@ -5660,7 +5806,7 @@ const App: React.FC = () => {
 
         // Check if Scenario A (Names mapped) or Scenario B (Names set to "Ignore, names not available in the file")
         if (nameOption !== 'IGNORE') {
-            // SCENARIO A: Method is "Salary Identifier" or "Planday Employee ID" AND Names are Mapped
+            // SCENARIO A: Method is "Salary Identifier", "Planday Employee ID" or "Username" AND Names are Mapped
             // Cross-check validation step:
             // Compare Expected Employee Name vs Uploaded Name using loose/fuzzy matching.
             const foundDiscrepancies: DiscrepancyItem[] = [];
@@ -5675,6 +5821,8 @@ const App: React.FC = () => {
                 let emp: Employee | undefined;
                 if (method === 'API_ID') {
                     emp = allEmployees.find(e => String(e.id).trim().toLowerCase() === cleanId.toLowerCase());
+                } else if (method === 'USERNAME') {
+                    emp = allEmployees.find(e => e.userName && String(e.userName).trim().toLowerCase() === cleanId.toLowerCase());
                 } else {
                     emp = allEmployees.find(e => e.salaryIdentifier && String(e.salaryIdentifier).trim().toLowerCase() === cleanId.toLowerCase());
                 }
@@ -5700,7 +5848,7 @@ const App: React.FC = () => {
                             idField: idCol,
                             idMethod: method,
                             expectedEmployeeId: emp?.id,
-                            expectedName: expectedName || "(No employee found in Planday with this ID)",
+                            expectedName: expectedName || `(No employee found in Planday with this ${method === 'USERNAME' ? 'Username' : 'ID'})`,
                             uploadedName: uploadedName || "(No name provided in file row)"
                         });
                     }
@@ -5730,7 +5878,7 @@ const App: React.FC = () => {
     };
 
     const proceedWithIdImport = (
-        method: 'ID' | 'API_ID', 
+        method: 'ID' | 'API_ID' | 'USERNAME', 
         idCol: string, 
         nameOption?: string, 
         nameCol1?: string, 
@@ -5738,7 +5886,7 @@ const App: React.FC = () => {
     ) => {
         setIsLoading(true);
         setShowLoadingBar(true);
-        setLoadingText("Matching employees by ID...");
+        setLoadingText(method === 'USERNAME' ? "Matching employees by Username..." : "Matching employees by ID...");
 
         setTimeout(() => {
             const autoMap = new Map<number, number | null>();
@@ -5752,7 +5900,7 @@ const App: React.FC = () => {
                 if (nameCol1 && !usedCols.includes(nameCol1)) usedCols.push(nameCol1);
             }
 
-            ['Planday Employee ID', 'First Name', 'Last Name', 'Salary Identifier (Payroll ID)'].forEach(c => {
+            ['Planday Employee ID', 'First Name', 'Last Name', 'Salary Identifier (Payroll ID)', 'Username', 'User Name', 'Email'].forEach(c => {
                 if (!usedCols.includes(c)) usedCols.push(c);
             });
 
@@ -5763,6 +5911,8 @@ const App: React.FC = () => {
                     let emp: Employee | undefined;
                     if (method === 'API_ID') {
                         emp = allEmployees.find(e => String(e.id).trim().toLowerCase() === cleanVal);
+                    } else if (method === 'USERNAME') {
+                        emp = allEmployees.find(e => e.userName && String(e.userName).trim().toLowerCase() === cleanVal);
                     } else {
                         emp = allEmployees.find(e => e.salaryIdentifier && String(e.salaryIdentifier).trim().toLowerCase() === cleanVal);
                     }
