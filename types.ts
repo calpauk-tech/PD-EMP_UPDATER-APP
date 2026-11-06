@@ -148,3 +148,13 @@ export interface DiscrepancyItem {
     expectedName: string;
     uploadedName: string;
 }
+
+export interface SkippedUnmappedEmployee {
+    rowIndex: number;
+    rowNumber: number;
+    employeeName: string;
+    identifier?: string;
+    rowData: Record<string, any>;
+    reason: string;
+}
+

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx-js-style';
-import type { PlandayApiCredentials, DefinitionCollection, EmployeeUpdateReview, UpdateWageRatePayload, UpdateActionResult, FieldDefinition, Employee, DiscrepancyItem } from './types';
+import type { PlandayApiCredentials, DefinitionCollection, EmployeeUpdateReview, UpdateWageRatePayload, UpdateActionResult, FieldDefinition, Employee, DiscrepancyItem, SkippedUnmappedEmployee } from './types';
 import { initializeService, fetchEmployees, fetchAllDefinitions, fetchFieldDefinitions, fetchEmployeeDetails, fetchEmployeeContractRule, fetchEmployeeSalary, fetchEmployeePayRates, updateEmployee, assignContractRule, changeUsername, updateFixedSalary, updateWageRate, resetService, revokeToken, fetchPaginatedData, fetchPortalInfo } from './services/plandayService';
 
 // --- Utility Functions ---
@@ -4326,7 +4326,22 @@ const App: React.FC = () => {
     const [generatedWorkbook, setGeneratedWorkbook] = useState<XLSX.WorkBook | null>(null);
     const [updateMethod, setUpdateMethod] = useState<'excel' | 'editor'>('excel');
     const [showEditorEditorInstructions, setShowEditorEditorInstructions] = useState(false);
-    const [portalName, setPortalName] = useState<string | null>(null);
+    const [portalName, setPortalName] = useState<string | null>(() => {
+        try {
+            return sessionStorage.getItem('plandayPortalName');
+        } catch {
+            return null;
+        }
+    });
+
+    const getExportFileName = (baseName: string) => {
+        const rawPortal = portalName || (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('plandayPortalName') : null);
+        if (!rawPortal || !rawPortal.trim()) {
+            return baseName;
+        }
+        const cleanPortal = rawPortal.trim().replace(/[/\\?%*:|"<>]/g, '-').replace(/[_-]+$/, '');
+        return cleanPortal ? `${cleanPortal}_${baseName}` : baseName;
+    };
     const [showHelpModal, setShowHelpModal] = useState(false);
     
     // Stop process references
@@ -4512,6 +4527,9 @@ const App: React.FC = () => {
 
     // New state for custom file mapping
     const [unmappedJson, setUnmappedJson] = useState<any[]>([]);
+    const [originalFileHeaders, setOriginalFileHeaders] = useState<string[]>([]);
+    const [skippedUnmappedEmployees, setSkippedUnmappedEmployees] = useState<SkippedUnmappedEmployee[]>([]);
+    const [excludedTableEmployees, setExcludedTableEmployees] = useState<{ employeeId: number; employeeName: string; reason: string }[]>([]);
     const [employeeMapping, setEmployeeMapping] = useState<Map<number, number>>(new Map());
     const [initialAutoMapping, setInitialAutoMapping] = useState<Map<number, number | null>>(new Map());
     const [selectedIdentityMethod, setSelectedIdentityMethod] = useState<'NAME' | 'ID' | 'API_ID' | 'USERNAME'>('NAME');
@@ -4575,10 +4593,22 @@ const App: React.FC = () => {
                 fetchPortalInfo()
             ]).then(([defs, info]) => {
                 setDefinitions(defs);
-                if (info && info.name) setPortalName(info.name);
+                if (info && info.name) {
+                    setPortalName(info.name);
+                    try { sessionStorage.setItem('plandayPortalName', info.name); } catch {}
+                }
             }).catch(console.error).finally(() => setIsLoading(false));
         }
-    }, [currentStep, allEmployees.length, definitions]);
+
+        if (sessionStorage.getItem('plandayCredentials') && !portalName) {
+            fetchPortalInfo().then(info => {
+                if (info && info.name) {
+                    setPortalName(info.name);
+                    try { sessionStorage.setItem('plandayPortalName', info.name); } catch {}
+                }
+            }).catch(console.error);
+        }
+    }, [currentStep, allEmployees.length, definitions, portalName]);
 
     const handleAuthSuccess = (creds: PlandayApiCredentials) => {
         sessionStorage.setItem('plandayCredentials', JSON.stringify(creds));
@@ -4597,7 +4627,10 @@ const App: React.FC = () => {
                 fetchEmployees()
             ]);
             setDefinitions(defs);
-            if (info && info.name) setPortalName(info.name);
+            if (info && info.name) {
+                setPortalName(info.name);
+                try { sessionStorage.setItem('plandayPortalName', info.name); } catch {}
+            }
             setAllEmployees(employees);
 
             // Prune selection sets from any fields that no longer exist in the portal
@@ -4681,6 +4714,7 @@ const App: React.FC = () => {
             console.warn('Error during token revocation:', e);
         } finally {
             sessionStorage.removeItem('plandayCredentials');
+            try { sessionStorage.removeItem('plandayPortalName'); } catch {}
             resetService();
             setPortalName(null);
             setDefinitions(null);
@@ -4700,6 +4734,9 @@ const App: React.FC = () => {
             setHistory([]);
             setHistoryIndex(-1);
             setUnmappedJson([]);
+            setOriginalFileHeaders([]);
+            setSkippedUnmappedEmployees([]);
+            setExcludedTableEmployees([]);
             setEmployeeMapping(new Map());
             setInitialAutoMapping(new Map());
             setFieldMapping(new Map());
@@ -4725,6 +4762,9 @@ const App: React.FC = () => {
         setHistory([]);
         setHistoryIndex(-1);
         setUnmappedJson([]);
+        setOriginalFileHeaders([]);
+        setSkippedUnmappedEmployees([]);
+        setExcludedTableEmployees([]);
         setEmployeeMapping(new Map());
         setInitialAutoMapping(new Map());
         setFieldMapping(new Map());
@@ -5471,7 +5511,7 @@ const App: React.FC = () => {
             XLSX.utils.book_append_sheet(wb, wsInfo, "Instructions"); 
             
             setGeneratedWorkbook(wb);
-            XLSX.writeFile(wb, "Planday_Employee_Update_Template.xlsx");
+            XLSX.writeFile(wb, getExportFileName("Planday_Employee_Update_Template.xlsx"));
             setProgress(100);
 
         } catch (e: any) { setError(e.message); }
@@ -5547,6 +5587,7 @@ const App: React.FC = () => {
                 }
 
                 setDuplicateHeadersWarning(duplicatesRenamed);
+                setOriginalFileHeaders(dedupedHeaders);
 
                 const json: any[] = [];
                 for (let r = 1; r < rawArray.length; r++) {
@@ -5574,6 +5615,8 @@ const App: React.FC = () => {
                 
                 // Clear previous custom mapping state
                 setUnmappedJson([]);
+                setSkippedUnmappedEmployees([]);
+                setExcludedTableEmployees([]);
                 setExplicitAddedCols(new Set());
                 setHistory([]);
                 setHistoryIndex(-1);
@@ -5958,6 +6001,9 @@ const App: React.FC = () => {
         setIgnoredDiscrepancies(false);
         setPendingIdConfig(null);
         setUnmappedJson([]);
+        setOriginalFileHeaders([]);
+        setSkippedUnmappedEmployees([]);
+        setExcludedTableEmployees([]);
         setRawFileJson(null);
         setEmployeeMapping(new Map());
         setInitialAutoMapping(new Map());
@@ -6071,7 +6117,7 @@ const App: React.FC = () => {
         ws['!cols'] = [{ wch: 10 }, { wch: 30 }, { wch: 30 }, { wch: 15 }, { wch: 30 }, { wch: 60 }];
         XLSX.utils.book_append_sheet(wb, ws, "Skipped Updates Log");
 
-        XLSX.writeFile(wb, "Planday_Skipped_Emp_Updates.xlsx");
+        XLSX.writeFile(wb, getExportFileName("Planday_Skipped_Emp_Updates.xlsx"));
     };
 
     const handleSkipInvalidFields = (generateLog: boolean) => {
@@ -6227,14 +6273,32 @@ const App: React.FC = () => {
             try {
                 // Transform Unmapped Data to Standard Data
                 const mappedRows: any[] = [];
+                const skippedEmployees: SkippedUnmappedEmployee[] = [];
                 
                 unmappedJson.forEach((row, idx) => {
                     // Only process rows where we found an employee ID
                     const empId = employeeMapping.get(idx);
-                    if (!empId) return;
-
-                    const emp = allEmployees.find(e => e.id === empId);
-                    if (!emp) return;
+                    const emp = empId ? allEmployees.find(e => e.id === empId) : undefined;
+                    if (!empId || !emp) {
+                        const extractedName = extractEmployeeName(row);
+                        const idVal = row["Planday Employee ID"] || 
+                                      row["Salary Identifier (Payroll ID)"] || 
+                                      row["Salary Identifier"] || 
+                                      row["Username (Email)"] || 
+                                      row["Username"] || 
+                                      row["User Name"] || 
+                                      row["Email"] || "";
+                        const displayName = extractedName || (idVal ? `Row ${idx + 2} (${idVal})` : `Row ${idx + 2} (Unmapped)`);
+                        skippedEmployees.push({
+                            rowIndex: idx,
+                            rowNumber: idx + 2,
+                            employeeName: displayName,
+                            identifier: idVal ? String(idVal) : undefined,
+                            rowData: row,
+                            reason: "Not mapped to a Planday employee during mapping stage"
+                        });
+                        return;
+                    }
 
                     const newRow: any = {
                         "Planday Employee ID": empId,
@@ -6420,6 +6484,7 @@ const App: React.FC = () => {
                      throw new Error("No valid rows mapped. Please ensure employees are selected.");
                 }
 
+                setSkippedUnmappedEmployees(skippedEmployees);
                 processStandardJson(mappedRows);
             } catch (e: any) {
                 setError(e.message);
@@ -7967,6 +8032,8 @@ const App: React.FC = () => {
         const errorStyle = { fill: { fgColor: { rgb: "FFDBCA" } }, border: { top: { style: 'thin', color: { rgb: "D9D9D9" } }, bottom: { style: 'thin', color: { rgb: "D9D9D9" } }, left: { style: 'thin', color: { rgb: "D9D9D9" } }, right: { style: 'thin', color: { rgb: "D9D9D9" } } } };
         const abortedStyle = { fill: { fgColor: { rgb: "FFEAE6" } }, border: { top: { style: 'thin', color: { rgb: "D9D9D9" } }, bottom: { style: 'thin', color: { rgb: "D9D9D9" } }, left: { style: 'thin', color: { rgb: "D9D9D9" } }, right: { style: 'thin', color: { rgb: "D9D9D9" } } } };
         const partialStyle = { fill: { fgColor: { rgb: "FFFDAC" } }, border: { top: { style: 'thin', color: { rgb: "D9D9D9" } }, bottom: { style: 'thin', color: { rgb: "D9D9D9" } }, left: { style: 'thin', color: { rgb: "D9D9D9" } }, right: { style: 'thin', color: { rgb: "D9D9D9" } } } };
+        const excludedStyle = { fill: { fgColor: { rgb: "E9ECEF" } }, font: { color: { rgb: "495057" }, bold: true }, border: { top: { style: 'thin', color: { rgb: "D9D9D9" } }, bottom: { style: 'thin', color: { rgb: "D9D9D9" } }, left: { style: 'thin', color: { rgb: "D9D9D9" } }, right: { style: 'thin', color: { rgb: "D9D9D9" } } } };
+        const noUpdatesStyle = { fill: { fgColor: { rgb: "E2E8F0" } }, font: { color: { rgb: "475569" }, bold: true }, border: { top: { style: 'thin', color: { rgb: "D9D9D9" } }, bottom: { style: 'thin', color: { rgb: "D9D9D9" } }, left: { style: 'thin', color: { rgb: "D9D9D9" } }, right: { style: 'thin', color: { rgb: "D9D9D9" } } } };
         const boldDeleteStyle = { font: { bold: true } };
         const fireErrorStyle = { 
             fill: { fgColor: { rgb: "FF3333" } }, 
@@ -8019,6 +8086,7 @@ const App: React.FC = () => {
             if (r.status === 'success') statusText = 'Success';
             else if (r.status === 'partial') statusText = 'Partial Success';
             else if (r.status === 'aborted') statusText = 'Aborted';
+            else if (r.status === 'no_updates') statusText = 'No updates found';
 
             // HR Fields
             let hrStatus = 'Skipped';
@@ -8057,7 +8125,7 @@ const App: React.FC = () => {
             return {
                 "Employee Name": r.employeeName,
                 "Overall Status": statusText,
-                "Result Message": r.resultMessage || '',
+                "Result Message": r.status === 'no_updates' ? (r.resultMessage || 'No updates found in table for this employee') : (r.resultMessage || ''),
                 "HR Fields Status": hrStatus,
                 "Supervisor Status": supStatus,
                 "Contract Rule Status": conStatus,
@@ -8065,7 +8133,30 @@ const App: React.FC = () => {
             };
         });
 
-        const ws1 = XLSX.utils.json_to_sheet(data1, { header: headers1 });
+        const excludedTableData1 = excludedTableEmployees
+            .filter(ex => !reviews.some(r => r.employeeId === ex.employeeId))
+            .map(ex => ({
+                "Employee Name": ex.employeeName,
+                "Overall Status": "No updates found",
+                "Result Message": "Excluded from update table by user",
+                "HR Fields Status": "Skipped",
+                "Supervisor Status": "Skipped",
+                "Contract Rule Status": "Skipped",
+                "Wages & Salaries Status": "Skipped"
+            }));
+
+        const skippedData1 = skippedUnmappedEmployees.map(s => ({
+            "Employee Name": s.employeeName,
+            "Overall Status": "Excluded (Unmapped)",
+            "Result Message": "Excluded during mapping stage - not mapped to a Planday employee",
+            "HR Fields Status": "Skipped",
+            "Supervisor Status": "Skipped",
+            "Contract Rule Status": "Skipped",
+            "Wages & Salaries Status": "Skipped"
+        }));
+
+        const allData1 = [...data1, ...excludedTableData1, ...skippedData1];
+        const ws1 = XLSX.utils.json_to_sheet(allData1, { header: headers1 });
         
         // Styling Sheet 1
         const range1 = XLSX.utils.decode_range(ws1['!ref']);
@@ -8087,6 +8178,8 @@ const App: React.FC = () => {
                 else if (cell.v === 'Partial Success') cell.s = partialStyle;
                 else if (cell.v === 'Failed') cell.s = errorStyle;
                 else if (cell.v === 'Aborted') cell.s = abortedStyle;
+                else if (cell.v === 'Excluded (Unmapped)') cell.s = excludedStyle;
+                else if (cell.v === 'No updates found') cell.s = noUpdatesStyle;
             }
 
             // Text Styles for specific columns (Indices: 3, 4, 5, 6)
@@ -8385,7 +8478,169 @@ const App: React.FC = () => {
         ws2['!cols'] = headerRow.map(() => ({ wch: 20 }));
 
         XLSX.utils.book_append_sheet(wb, ws2, "Fields Updated");
-        XLSX.writeFile(wb, "Planday_Update_Results.xlsx");
+
+        // --- SHEET 3: Unmapped Employees Overview ---
+        if (skippedUnmappedEmployees.length > 0) {
+            const fileHeaders: string[] = originalFileHeaders.length > 0
+                ? originalFileHeaders
+                : Array.from(
+                    new Set<string>(
+                        unmappedJson.length > 0
+                            ? unmappedJson.flatMap(r => Object.keys(r))
+                            : skippedUnmappedEmployees.flatMap(s => Object.keys(s.rowData))
+                    )
+                );
+
+            const headers3: string[] = [
+                ...fileHeaders,
+                "Exclusion Reason",
+                "Original File Row #"
+            ];
+
+            const data3 = skippedUnmappedEmployees.map(s => {
+                const rowObj: Record<string, any> = {};
+                fileHeaders.forEach(h => {
+                    rowObj[h] = s.rowData[h] !== undefined && s.rowData[h] !== null ? s.rowData[h] : "";
+                });
+                rowObj["Exclusion Reason"] = s.reason || "Not mapped to a Planday employee during mapping stage";
+                rowObj["Original File Row #"] = s.rowNumber;
+                return rowObj;
+            });
+
+            const ws3 = XLSX.utils.json_to_sheet(data3, { header: headers3 });
+            const range3 = XLSX.utils.decode_range(ws3['!ref']);
+
+            for (let C = range3.s.c; C <= range3.e.c; ++C) {
+                const cellRef = XLSX.utils.encode_cell({ r: 0, c: C });
+                if (!ws3[cellRef]) ws3[cellRef] = { v: "" };
+                ws3[cellRef].s = headerStyle;
+            }
+
+            const rowBaseStyle = {
+                font: { color: { rgb: "333333" } },
+                border: {
+                    top: { style: 'thin', color: { rgb: "D9D9D9" } },
+                    bottom: { style: 'thin', color: { rgb: "D9D9D9" } },
+                    left: { style: 'thin', color: { rgb: "D9D9D9" } },
+                    right: { style: 'thin', color: { rgb: "D9D9D9" } }
+                },
+                alignment: { vertical: "center", wrapText: true }
+            };
+            const rowReasonStyle = {
+                ...rowBaseStyle,
+                fill: { fgColor: { rgb: "F3F4F6" } },
+                font: { color: { rgb: "6B7280" }, italic: true }
+            };
+
+            const reasonColIdx = fileHeaders.length;
+            const origRowColIdx = fileHeaders.length + 1;
+
+            for (let R = 1; R <= range3.e.r; ++R) {
+                for (let C = range3.s.c; C <= range3.e.c; ++C) {
+                    const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+                    if (ws3[cellRef]) {
+                        ws3[cellRef].s = (C === reasonColIdx || C === origRowColIdx) ? rowReasonStyle : rowBaseStyle;
+                    }
+                }
+            }
+
+            ws3['!cols'] = headers3.map((h, i) => {
+                if (i === reasonColIdx) return { wch: 45 };
+                if (i === origRowColIdx) return { wch: 22 };
+                return { wch: Math.max(16, h.length + 4) };
+            });
+
+            XLSX.utils.book_append_sheet(wb, ws3, "Unmapped Employees");
+        }
+
+        XLSX.writeFile(wb, getExportFileName("Planday_Update_Results.xlsx"));
+    };
+
+    const handleExportUnmappedEmployeesOnly = () => {
+        if (skippedUnmappedEmployees.length === 0) return;
+        const wb = XLSX.utils.book_new();
+        const fileHeaders: string[] = originalFileHeaders.length > 0
+            ? originalFileHeaders
+            : Array.from(
+                new Set<string>(
+                    unmappedJson.length > 0
+                        ? unmappedJson.flatMap(r => Object.keys(r))
+                        : skippedUnmappedEmployees.flatMap(s => Object.keys(s.rowData))
+                )
+            );
+
+        const headers: string[] = [
+            ...fileHeaders,
+            "Exclusion Reason",
+            "Original File Row #"
+        ];
+
+        const data = skippedUnmappedEmployees.map(s => {
+            const rowObj: Record<string, any> = {};
+            fileHeaders.forEach(h => {
+                rowObj[h] = s.rowData[h] !== undefined && s.rowData[h] !== null ? s.rowData[h] : "";
+            });
+            rowObj["Exclusion Reason"] = s.reason || "Not mapped to a Planday employee during mapping stage";
+            rowObj["Original File Row #"] = s.rowNumber;
+            return rowObj;
+        });
+
+        const ws = XLSX.utils.json_to_sheet(data, { header: headers });
+        const range = XLSX.utils.decode_range(ws['!ref']);
+
+        const headerStyle = {
+            fill: { fgColor: { rgb: "162C34" } },
+            font: { color: { rgb: "FFFFFF" }, bold: true },
+            border: {
+                top: { style: 'thin', color: { rgb: "D9D9D9" } },
+                bottom: { style: 'thin', color: { rgb: "D9D9D9" } },
+                left: { style: 'thin', color: { rgb: "D9D9D9" } },
+                right: { style: 'thin', color: { rgb: "D9D9D9" } }
+            }
+        };
+
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+            const cellRef = XLSX.utils.encode_cell({ r: 0, c: C });
+            if (!ws[cellRef]) ws[cellRef] = { v: "" };
+            ws[cellRef].s = headerStyle;
+        }
+
+        const rowBaseStyle = {
+            font: { color: { rgb: "333333" } },
+            border: {
+                top: { style: 'thin', color: { rgb: "D9D9D9" } },
+                bottom: { style: 'thin', color: { rgb: "D9D9D9" } },
+                left: { style: 'thin', color: { rgb: "D9D9D9" } },
+                right: { style: 'thin', color: { rgb: "D9D9D9" } }
+            },
+            alignment: { vertical: "center", wrapText: true }
+        };
+        const rowReasonStyle = {
+            ...rowBaseStyle,
+            fill: { fgColor: { rgb: "F3F4F6" } },
+            font: { color: { rgb: "6B7280" }, italic: true }
+        };
+
+        const reasonColIdx = fileHeaders.length;
+        const origRowColIdx = fileHeaders.length + 1;
+
+        for (let R = 1; R <= range.e.r; ++R) {
+            for (let C = range.s.c; C <= range.e.c; ++C) {
+                const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+                if (ws[cellRef]) {
+                    ws[cellRef].s = (C === reasonColIdx || C === origRowColIdx) ? rowReasonStyle : rowBaseStyle;
+                }
+            }
+        }
+
+        ws['!cols'] = headers.map((h, i) => {
+            if (i === reasonColIdx) return { wch: 45 };
+            if (i === origRowColIdx) return { wch: 22 };
+            return { wch: Math.max(16, h.length + 4) };
+        });
+
+        XLSX.utils.book_append_sheet(wb, ws, "Unmapped Employees");
+        XLSX.writeFile(wb, getExportFileName("Planday_Skipped_Unmapped_Employees.xlsx"));
     };
 
     const allEmployeesMap = useMemo(() => {
@@ -8747,6 +9002,15 @@ const App: React.FC = () => {
     const handleRemoveSelected = () => {
         if (!rawFileJson || selectedReviewIds.size === 0) return;
         
+        const removed = reviews
+            .filter(r => selectedReviewIds.has(r.employeeId))
+            .map(r => ({
+                employeeId: r.employeeId,
+                employeeName: r.employeeName,
+                reason: "Excluded from update table by user"
+            }));
+        setExcludedTableEmployees(prev => [...prev, ...removed]);
+
         const newFileJson = rawFileJson.filter(row => {
             const empId = parseInt(row["Planday Employee ID"]);
             return !selectedReviewIds.has(empId);
@@ -9506,7 +9770,7 @@ const App: React.FC = () => {
                                         <button 
                                             onClick={() => {
                                                 if (generatedWorkbook) {
-                                                    XLSX.writeFile(generatedWorkbook, "Planday_Employee_Update_Template.xlsx");
+                                                    XLSX.writeFile(generatedWorkbook, getExportFileName("Planday_Employee_Update_Template.xlsx"));
                                                 }
                                             }} 
                                             disabled={!generatedWorkbook}
@@ -9746,6 +10010,18 @@ const App: React.FC = () => {
                                             <h3 className="text-sm font-bold text-blue-900">Add fields to include for update</h3>
                                             <p className="text-sm text-blue-700 mt-1">
                                                 All selected employees have been added to the table. Click <strong>"Add fields to the Update Table"</strong> above the Bulk Edit section to choose which columns you want to edit. Then you can make your changes directly within the table.
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {skippedUnmappedEmployees.length > 0 && (
+                                    <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
+                                        <InfoIcon className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+                                        <div>
+                                            <h3 className="text-sm font-bold text-amber-900">Unmapped Employees Excluded ({skippedUnmappedEmployees.length})</h3>
+                                            <p className="text-sm text-amber-700 mt-1">
+                                                <strong>{skippedUnmappedEmployees.length}</strong> employee(s) from your file were not mapped to Planday employees during the mapping stage and are excluded from the table below. When the update completes, they will be included in the update results overview and downloadable results file.
                                             </p>
                                         </div>
                                     </div>
@@ -10336,7 +10612,46 @@ const App: React.FC = () => {
                                     </div>
                                 )}
                                 
-                                <div className="flex justify-center gap-12 mb-8">
+                                {(() => {
+                                    const unmappedCount = skippedUnmappedEmployees.length;
+                                    const noUpdatesCount = reviews.filter(r => r.status === 'no_updates').length + 
+                                        excludedTableEmployees.filter(ex => !reviews.some(r => r.employeeId === ex.employeeId)).length;
+                                    
+                                    if (unmappedCount === 0 && noUpdatesCount === 0) return null;
+
+                                    let title = "Unmapped Employees Excluded";
+                                    if (unmappedCount > 0 && noUpdatesCount > 0) {
+                                        title = "Excluded & Skipped Employees";
+                                    } else if (unmappedCount === 0 && noUpdatesCount > 0) {
+                                        title = "Employees Not Updated";
+                                    }
+
+                                    return (
+                                        <div className="mb-6 bg-amber-50 border border-amber-200 p-4 rounded-lg flex items-start gap-3">
+                                            <InfoIcon className="w-6 h-6 text-amber-600 mt-0.5 shrink-0" />
+                                            <div>
+                                                <h3 className="text-amber-800 font-bold">{title}</h3>
+                                                <div className="text-amber-700 text-sm mt-1 space-y-1">
+                                                    {unmappedCount > 0 && (
+                                                        <p>
+                                                            <strong>{unmappedCount}</strong> employee{unmappedCount === 1 ? '' : 's'} from your file were excluded because they were not mapped to a Planday employee during the mapping stage.
+                                                        </p>
+                                                    )}
+                                                    {noUpdatesCount > 0 && (
+                                                        <p>
+                                                            <strong>{noUpdatesCount}</strong> employee{noUpdatesCount === 1 ? '' : 's'} were not updated, since no values were inputted for update fields in the file/table.
+                                                        </p>
+                                                    )}
+                                                    <p className="text-amber-800/90 font-medium pt-0.5">
+                                                        They are listed below and included in the exported results file.
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+                                
+                                <div className="flex flex-wrap justify-center gap-8 md:gap-12 mb-8">
                                     <div className="text-center">
                                         <p className="text-5xl font-bold text-green-500">{reviews.filter(r => r.status === 'success').length}</p>
                                         <p className="text-gray-500 font-medium mt-2">Successful</p>
@@ -10362,7 +10677,7 @@ const App: React.FC = () => {
                                         <thead className="bg-gray-50 sticky top-0 shadow-sm z-10">
                                             <tr>
                                                 <th className="p-3 font-semibold text-gray-700 w-1/4">Employee</th>
-                                                <th className="p-3 font-semibold text-gray-700 w-28">Status</th>
+                                                <th className="p-3 font-semibold text-gray-700 w-[146px]">Status</th>
                                                 <th className="p-3 font-semibold text-gray-700">Details</th>
                                             </tr>
                                         </thead>
@@ -10381,15 +10696,62 @@ const App: React.FC = () => {
                                                     </td>
                                                 </tr>
                                             ))}
+                                            {reviews.filter(r => r.status === 'no_updates').map(r => (
+                                                <tr key={`no-upd-${r.employeeId}`} className="hover:bg-gray-50 bg-slate-50/40">
+                                                    <td className="p-3 font-medium text-gray-800 align-top">{r.employeeName}</td>
+                                                    <td className="p-3 align-top">
+                                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                                                            No updates found
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-3 align-top text-gray-500 italic text-sm">
+                                                        No updates found in table for this employee
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                            {excludedTableEmployees.filter(ex => !reviews.some(r => r.employeeId === ex.employeeId)).map(ex => (
+                                                <tr key={`ex-tbl-${ex.employeeId}`} className="hover:bg-gray-50 bg-slate-50/40">
+                                                    <td className="p-3 font-medium text-gray-800 align-top">{ex.employeeName}</td>
+                                                    <td className="p-3 align-top">
+                                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                                                            No updates found
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-3 align-top text-gray-500 italic text-sm">
+                                                        Excluded from update table by user - No updates applied
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                            {skippedUnmappedEmployees.map((s, idx) => (
+                                                <tr key={`skipped-unmapped-${idx}`} className="hover:bg-gray-50 bg-gray-50/60">
+                                                    <td className="p-3 font-medium text-gray-800 align-top">
+                                                        <div className="flex items-center gap-2">
+                                                            <span>{s.employeeName}</span>
+                                                            <span className="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded font-mono">Row #{s.rowNumber}</span>
+                                                        </div>
+                                                        {s.identifier && (
+                                                            <div className="text-xs text-gray-500 mt-0.5">ID: {s.identifier}</div>
+                                                        )}
+                                                    </td>
+                                                    <td className="p-3 align-top">
+                                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-200 text-gray-700 border border-gray-300">
+                                                            Excluded (Unmapped)
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-3 align-top text-gray-500 italic text-sm">
+                                                        Excluded during mapping stage - not mapped to a Planday employee
+                                                    </td>
+                                                </tr>
+                                            ))}
                                         </tbody>
                                     </table>
                                 </div>
 
-                                <div className="flex justify-center gap-4">
+                                <div className="flex flex-wrap justify-center gap-4">
                                     <button onClick={handleBackToTable} className="bg-white text-black border-2 border-black px-6 py-3 rounded-lg font-bold hover:bg-gray-50 flex items-center gap-2">
                                         Back to Table
                                     </button>
-                                    <button onClick={handleExportResults} className="bg-green-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-green-700 flex items-center gap-2">
+                                    <button onClick={handleExportResults} className="bg-green-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-green-700 flex items-center gap-2 shadow-sm">
                                         <DownloadIcon className="w-5 h-5"/> Export Detailed Results
                                     </button>
                                     <button onClick={handleStartNewUpdate} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700">
@@ -10410,6 +10772,11 @@ const App: React.FC = () => {
                     message={
                         <>
                             The update process is about to start. Note that <span className="text-blue-600 font-medium">{reviews.filter(r => r.status !== 'no_updates').length} employee(s) with updates pending</span> will be applied, not just the currently filtered ones. Are you ready to proceed?
+                            {skippedUnmappedEmployees.length > 0 && (
+                                <p className="mt-2 text-sm text-gray-600 bg-gray-50 p-2.5 rounded border border-gray-200">
+                                    ℹ️ <strong>{skippedUnmappedEmployees.length}</strong> employee(s) from your file were not mapped and will be excluded. You will be able to review and download them in the results file.
+                                </p>
+                            )}
                         </>
                     }
                     confirmText="Yes, I have finished reviewing the fields"

@@ -7,12 +7,14 @@ const API_BASE_URL = 'https://openapi.planday.com';
 let credentials_internal: PlandayApiCredentials | null = null;
 let accessToken: string | null = null;
 let tokenExpiry: number | null = null;
+let pendingTokenPromise: Promise<string> | null = null;
 let globalDelayUntil = 0;
 
 export function initializeService(credentials: PlandayApiCredentials) {
     if (credentials_internal?.clientId !== credentials.clientId || credentials_internal?.refreshToken !== credentials.refreshToken) {
         accessToken = null;
         tokenExpiry = null;
+        pendingTokenPromise = null;
     }
     credentials_internal = { ...credentials };
 }
@@ -21,6 +23,23 @@ export function resetService() {
     credentials_internal = null;
     accessToken = null;
     tokenExpiry = null;
+    pendingTokenPromise = null;
+}
+
+export async function validateAndAuthenticate(credentials: PlandayApiCredentials): Promise<{ ok: boolean; error?: string }> {
+    try {
+        initializeService(credentials);
+        await getAccessToken();
+        return { ok: true };
+    } catch (err: any) {
+        resetService();
+        try {
+            if (typeof window !== 'undefined') {
+                sessionStorage.removeItem('plandayCredentials');
+            }
+        } catch {}
+        return { ok: false, error: err?.message || 'Invalid or expired refresh token.' };
+    }
 }
 
 export async function revokeToken(): Promise<void> {
@@ -63,41 +82,86 @@ async function getAccessToken(): Promise<string> {
         return accessToken;
     }
 
-    if (!credentials_internal) {
-        throw new Error("Planday service not initialized with credentials.");
+    // Deduplicate concurrent requests so only one refresh_token exchange runs at a time
+    if (pendingTokenPromise) {
+        return pendingTokenPromise;
     }
 
-    const payload = new URLSearchParams({
-        'client_id': credentials_internal.clientId,
-        'grant_type': 'refresh_token',
-        'refresh_token': credentials_internal.refreshToken,
-    });
+    pendingTokenPromise = (async () => {
+        try {
+            if (!credentials_internal) {
+                try {
+                    const saved = typeof window !== 'undefined' ? sessionStorage.getItem('plandayCredentials') : null;
+                    if (saved) {
+                        credentials_internal = JSON.parse(saved);
+                    }
+                } catch {}
+            }
 
-    const response = await fetch(AUTH_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: payload.toString(),
-    });
+            if (!credentials_internal) {
+                throw new Error("Planday service not initialized with credentials.");
+            }
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        sessionStorage.removeItem('plandayCredentials');
-        credentials_internal = null;
-        accessToken = null;
-        tokenExpiry = null;
-        throw new Error(`Failed to refresh access token: ${response.status} ${errorText}. Your credentials may be invalid or expired. Please re-enter them.`);
-    }
+            const payload = new URLSearchParams({
+                'client_id': credentials_internal.clientId,
+                'grant_type': 'refresh_token',
+                'refresh_token': credentials_internal.refreshToken,
+            });
 
-    const data = await response.json();
-    accessToken = data.access_token;
-    tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
+            let response: Response;
+            try {
+                response = await fetch(AUTH_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: payload.toString(),
+                });
+            } catch (networkErr: any) {
+                throw new Error(`Unable to reach Planday authentication server: ${networkErr?.message || 'Network connection failed'}. Please check your connection and try again.`);
+            }
 
-    if (data.refresh_token && data.refresh_token !== credentials_internal.refreshToken) {
-        credentials_internal.refreshToken = data.refresh_token;
-        sessionStorage.setItem('plandayCredentials', JSON.stringify(credentials_internal));
-    }
-    
-    return accessToken;
+            if (!response.ok) {
+                const errorText = await response.text();
+                let parsedMsg = errorText;
+                try {
+                    const errJson = JSON.parse(errorText);
+                    if (errJson.error_description) {
+                        parsedMsg = errJson.error_description;
+                    } else if (errJson.error) {
+                        parsedMsg = errJson.error;
+                    }
+                } catch {}
+
+                try {
+                    if (typeof window !== 'undefined') {
+                        sessionStorage.removeItem('plandayCredentials');
+                    }
+                } catch {}
+                credentials_internal = null;
+                accessToken = null;
+                tokenExpiry = null;
+                throw new Error(`Failed to refresh access token (${response.status}): ${parsedMsg}. Your credentials may be invalid or expired. Please re-enter them.`);
+            }
+
+            const data = await response.json();
+            accessToken = data.access_token;
+            tokenExpiry = Date.now() + ((data.expires_in || 3600) - 60) * 1000;
+
+            if (data.refresh_token && credentials_internal) {
+                credentials_internal.refreshToken = data.refresh_token;
+                try {
+                    if (typeof window !== 'undefined') {
+                        sessionStorage.setItem('plandayCredentials', JSON.stringify(credentials_internal));
+                    }
+                } catch {}
+            }
+            
+            return accessToken;
+        } finally {
+            pendingTokenPromise = null;
+        }
+    })();
+
+    return pendingTokenPromise;
 }
 
 // Optimized retry logic with NetworkError handling and exponential backoff
@@ -118,6 +182,14 @@ async function fetchWithAuth(url: string, options: RequestInit = { method: 'GET'
 
     try {
         const response = await fetch(url, { ...options, headers });
+
+        // Handle 401 Unauthorized by clearing cached token and retrying
+        if (response.status === 401 && retries > 0) {
+            console.warn('Access token expired or rejected (401). Invalidating cached token and retrying...');
+            accessToken = null;
+            tokenExpiry = null;
+            return fetchWithAuth(url, options, retries - 1, backoffDelay);
+        }
 
         // Handle Rate Limiting (429)
         if (response.status === 429) {
