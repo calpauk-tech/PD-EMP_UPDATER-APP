@@ -1864,7 +1864,7 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
 
         const plandayIdCol = headers.find(h => /^(planday\s*employee\s*id|employee\s*id)$/i.test(h.trim()));
         const salaryIdCol = headers.find(h => /^(salary\s*identifier(\s*\(payroll\s*id\))?|payroll\s*id|salary\s*id)$/i.test(h.trim()));
-        const usernameCol = headers.find(h => /^(username|user\s*name|email|e-mail|brugernavn|användarnamn|benutzername)$/i.test(h.trim()));
+        const usernameCol = headers.find(h => /^(username\s*\(email\)|username|user\s*name|email|e-mail|brugernavn|användarnamn|benutzername)$/i.test(h.trim()));
 
         const fnCol = headers.find(h => /^(first\s*name|firstname|fornavn|förnamn|vorname)$/i.test(h.trim()));
         const lnCol = headers.find(h => /^(last\s*name|lastname|efternavn|efternamn|nachname|surname)$/i.test(h.trim()));
@@ -2180,19 +2180,19 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
                          <div className="flex-1">
                              <div className="font-bold flex items-center gap-2">
                                  <MailIcon className="w-5 h-5 text-gray-500"/>
-                                 Match by Username
+                                 Match by Username (Email)
                              </div>
                              <p className="text-sm text-gray-500 mt-1">Uses a specific column in your file to match against the Planday employee userName.</p>
                              
                              {method === 'USERNAME' && (
                                  <div className="mt-4 bg-white p-4 rounded-lg border border-gray-200 animate-fadeIn cursor-default" onClick={e => e.stopPropagation()}>
                                      <div className="mb-4">
-                                         <label className="block text-xs font-bold text-gray-700 mb-1">Select Column containing Username:</label>
+                                         <label className="block text-xs font-bold text-gray-700 mb-1">Select Column containing Username (Email):</label>
                                          <SearchableSelect 
                                             options={options} 
                                             value={selectedUsernameColumn} 
                                             onChange={setSelectedUsernameColumn} 
-                                            placeholder="-- Select Username Column --" 
+                                            placeholder="-- Select Username (Email) Column --" 
                                          />
                                      </div>
 
@@ -4971,11 +4971,13 @@ const App: React.FC = () => {
                 ["Planday Employee ID", "System ID", "REQUIRED", "Integer", "Do not edit. Used for identification."],
                 ["First Name", "First Name", "REQUIRED", "Text", "Do not edit. Used for identification."],
                 ["Last Name", "Last Name", "REQUIRED", "Text", "Do not edit. Used for identification."],
-                ["Salary Identifier (Payroll ID)", "Payroll ID", "", "Text", "Do not edit. Used for identification."]
+                ["Salary Identifier (Payroll ID)", "Payroll ID", "", "Text", "Do not edit. Used for identification."],
+                ["Username (Email)", "Username", "", "Text", "Do not edit. Used for identification."]
             ];
             
-            // Salary Identifier (Always included)
+            // Salary Identifier & Username (Email) (Always included as identification columns)
             headers.push("Salary Identifier (Payroll ID)");
+            headers.push("Username (Email)");
 
             if (selectedSections.system && selectedSystemFields.has('salaryIdentifier')) {
                 headers.push("UPDATE - Salary Identifier (Payroll ID)");
@@ -5147,8 +5149,9 @@ const App: React.FC = () => {
                 row["First Name"] = emp.firstName;
                 row["Last Name"] = emp.lastName;
                 
-                // Always populate Salary Identifier
+                // Always populate Salary Identifier and Username (Email)
                 row["Salary Identifier (Payroll ID)"] = data.salaryIdentifier || "";
+                row["Username (Email)"] = data.userName || emp.userName || "";
 
                 if (populateData) {
                     if (selectedSections.system) {
@@ -5415,7 +5418,7 @@ const App: React.FC = () => {
                             ws[cellRef].s = customStyles.b;
                         } else if (isUpdateCol) {
                             ws[cellRef].s = updateStyle;
-                        } else if (C <= 2) { // 0=ID, 1=First Name, 2=Last Name
+                        } else if (C <= 4) { // 0=ID, 1=First Name, 2=Last Name, 3=Salary Identifier, 4=Username (Email)
                             ws[cellRef].s = normalStyle;
                         } else {
                             // Pre-populated old values
@@ -5587,7 +5590,7 @@ const App: React.FC = () => {
                 const targetLabels = new Map(targetFields.map(f => [f.label, f.key])); // mapping from informational label to its update key
                 
                 const alwaysRecognized = new Set([
-                    "Planday Employee ID", "First Name", "Last Name", "Salary Identifier (Payroll ID)", "System ID"
+                    "Planday Employee ID", "First Name", "Last Name", "Salary Identifier (Payroll ID)", "Username (Email)", "System ID"
                 ]);
 
                 const hasUnknownColumns = headers.some(h => {
@@ -5789,6 +5792,10 @@ const App: React.FC = () => {
                     }
                 });
 
+                ['Planday Employee ID', 'First Name', 'Last Name', 'Salary Identifier (Payroll ID)', 'Username (Email)'].forEach(c => {
+                    if (!usedCols.includes(c)) usedCols.push(c);
+                });
+
                 setSelectedIdentityColumns(usedCols);
                 setInitialAutoMapping(autoMap);
                 setCurrentStep('map_employees');
@@ -5900,7 +5907,7 @@ const App: React.FC = () => {
                 if (nameCol1 && !usedCols.includes(nameCol1)) usedCols.push(nameCol1);
             }
 
-            ['Planday Employee ID', 'First Name', 'Last Name', 'Salary Identifier (Payroll ID)', 'Username', 'User Name', 'Email'].forEach(c => {
+            ['Planday Employee ID', 'First Name', 'Last Name', 'Salary Identifier (Payroll ID)', 'Username (Email)', 'Username', 'User Name', 'Email'].forEach(c => {
                 if (!usedCols.includes(c)) usedCols.push(c);
             });
 
