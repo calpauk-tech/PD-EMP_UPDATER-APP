@@ -1987,9 +1987,11 @@ interface IdentitySelectorProps {
     employees?: Employee[];
     onNext: (method: 'NAME' | 'ID' | 'API_ID' | 'USERNAME', config?: any) => void;
     onBack: () => void;
+    skippedHiddenRowsCount?: number;
+    visibleRowsCount?: number;
 }
 
-const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, employees = [], onNext, onBack, isLoading }) => {
+const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, employees = [], onNext, onBack, isLoading, skippedHiddenRowsCount = 0, visibleRowsCount = 0 }) => {
     const [method, setMethod] = useState<'NAME' | 'ID' | 'API_ID' | 'USERNAME'>('ID');
     const [selectedColumn, setSelectedColumn] = useState('');
     const [selectedApiIdColumn, setSelectedApiIdColumn] = useState('');
@@ -2150,6 +2152,22 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, employees 
              <p className="text-gray-500 mb-6">
                 Map how employees are identified from your file. To prevent ID mismatch errors from accidentally shifted rows, you can also map employee name columns for cross-check validation.
              </p>
+
+             {skippedHiddenRowsCount > 0 && (
+                 <div className="mb-6 bg-sky-50 border-l-4 border-sky-500 p-4 rounded-r-lg flex items-center">
+                     <div className="flex-shrink-0 text-sky-600 font-bold text-lg">
+                         ✓
+                     </div>
+                     <div className="ml-3">
+                         <h3 className="text-sm font-semibold text-sky-900">
+                             Smart Row Filter Active
+                         </h3>
+                         <p className="mt-0.5 text-xs text-sky-700">
+                             Skipped <strong>{skippedHiddenRowsCount}</strong> hidden / filtered row{skippedHiddenRowsCount === 1 ? '' : 's'} from your spreadsheet. Loaded <strong>{visibleRowsCount}</strong> visible employee row{visibleRowsCount === 1 ? '' : 's'} for processing.
+                         </p>
+                     </div>
+                 </div>
+             )}
 
              <div className="space-y-4 mb-8">
                  <div 
@@ -2556,9 +2574,10 @@ interface EmployeeMapperProps {
     onCancel: () => void;
     onBack: () => void;
     onShowHelp?: () => void;
+    skippedHiddenRowsCount?: number;
 }
 
-const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initialMapping, matchMethod = 'NAME', sharedSalaryIdInfo, onShowSharedSalaryModal, onComplete, onCancel, onBack, onShowHelp, isLoading }) => {
+const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initialMapping, matchMethod = 'NAME', sharedSalaryIdInfo, onShowSharedSalaryModal, onComplete, onCancel, onBack, onShowHelp, isLoading, skippedHiddenRowsCount = 0 }) => {
     // Attempt auto-match on mount if initialMapping not provided
     const [mapping, setMapping] = useState<Map<number, number | null>>(new Map());
     const [showUnmappedFirst, setShowUnmappedFirst] = useState(false);
@@ -2843,6 +2862,24 @@ const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initia
                 </div>
             )}
 
+            {skippedHiddenRowsCount > 0 && (
+                <div className="bg-sky-50 border-l-4 border-sky-500 p-4 mb-6 rounded-r-lg">
+                    <div className="flex items-center">
+                        <div className="flex-shrink-0 text-sky-600 font-bold text-lg">
+                            ✓
+                        </div>
+                        <div className="ml-3">
+                            <h3 className="text-sm font-semibold text-sky-900">
+                                Smart Row Filter Active
+                            </h3>
+                            <p className="mt-0.5 text-xs text-sky-700">
+                                Skipped <strong>{skippedHiddenRowsCount}</strong> hidden / filtered row{skippedHiddenRowsCount === 1 ? '' : 's'} from your spreadsheet. Displaying {rows.length} visible row{rows.length === 1 ? '' : 's'}.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {matchMethod === 'ID' && sharedSalaryIdInfo && sharedSalaryIdInfo.detected && (
                 <div className="bg-amber-50 border-l-4 border-amber-500 p-4 mb-6 rounded-r-lg animate-fadeIn">
                     <div className="flex items-start">
@@ -3037,6 +3074,7 @@ interface FieldMapperProps {
     onShowHelp?: () => void;
     duplicateHeadersWarning?: string[];
     usedIdentityColumns?: string[];
+    skippedHiddenRowsCount?: number;
 }
 
 const EmployeeMapperRow: React.FC<{
@@ -3211,7 +3249,7 @@ const FieldMapperRow: React.FC<{
     );
 };
 
-const FieldMapper: React.FC<FieldMapperProps> = ({ fileHeaders, availableTargets, onComplete, onCancel, initialMapping, onShowHelp, duplicateHeadersWarning, usedIdentityColumns, isLoading }) => {
+const FieldMapper: React.FC<FieldMapperProps> = ({ fileHeaders, availableTargets, onComplete, onCancel, initialMapping, onShowHelp, duplicateHeadersWarning, usedIdentityColumns, isLoading, skippedHiddenRowsCount = 0 }) => {
     const [mapping, setMapping] = useState<Map<string, string>>(new Map());
     const [identityHeaders, setIdentityHeaders] = useState<Set<string>>(new Set());
     const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -3553,6 +3591,24 @@ const FieldMapper: React.FC<FieldMapperProps> = ({ fileHeaders, availableTargets
                                     ))}
                                 </ul>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {skippedHiddenRowsCount > 0 && (
+                <div className="bg-sky-50 border-l-4 border-sky-500 p-4 mb-6 rounded-r-lg">
+                    <div className="flex items-center">
+                        <div className="flex-shrink-0 text-sky-600 font-bold text-lg">
+                            ✓
+                        </div>
+                        <div className="ml-3">
+                            <h3 className="text-sm font-semibold text-sky-900">
+                                Smart Row Filter Active
+                            </h3>
+                            <p className="mt-0.5 text-xs text-sky-700">
+                                <strong>{skippedHiddenRowsCount}</strong> hidden / filtered row{skippedHiddenRowsCount === 1 ? '' : 's'} from your spreadsheet were ignored during parsing.
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -3935,7 +3991,9 @@ interface DateLogItem {
 const getNonEmptyHeaders = (json: any[]) => {
     if (!json || json.length === 0) return [];
     const headerSet = new Set<string>();
-    json.forEach(row => Object.keys(row).forEach(k => headerSet.add(k)));
+    json.forEach(row => Object.keys(row).forEach(k => {
+        if (k !== '__originalRowNumber__') headerSet.add(k);
+    }));
     const headers = Array.from(headerSet);
     const lowerHeaders = new Set(headers.map(h => h.toLowerCase()));
     return headers.filter(h => {
@@ -4706,6 +4764,7 @@ const App: React.FC = () => {
     const [dateReport, setDateReport] = useState<DateLogItem[]>([]);
     const [detectedUSFormat, setDetectedUSFormat] = useState(false);
     const [duplicateHeadersWarning, setDuplicateHeadersWarning] = useState<string[]>([]);
+    const [skippedHiddenRowsCount, setSkippedHiddenRowsCount] = useState<number>(0);
 
     const [showDeptActionModal, setShowDeptActionModal] = useState(false);
     const [pendingDeptMapping, setPendingDeptMapping] = useState<Map<string, string> | null>(null);
@@ -5099,6 +5158,7 @@ const App: React.FC = () => {
         setLiveStats({ success: 0, partial: 0, error: 0, aborted: 0 });
         setAbortedCount(0);
         setDuplicateHeadersWarning([]);
+        setSkippedHiddenRowsCount(0);
         setSelectedReviewIds(new Set());
         setEditorErrors([]);
         setMissingWageTypeGroups([]);
@@ -5869,12 +5929,12 @@ const App: React.FC = () => {
                         }
                     }
                     if (decodedText) {
-                        wb = XLSX.read(decodedText, { type: 'string', cellDates: true });
+                        wb = XLSX.read(decodedText, { type: 'string', cellDates: true, cellStyles: true });
                     } else {
-                        wb = XLSX.read(data, { type: 'array', cellDates: true, codepage: 65001 });
+                        wb = XLSX.read(data, { type: 'array', cellDates: true, cellStyles: true, codepage: 65001 });
                     }
                 } else {
-                    wb = XLSX.read(data, { type: 'array', cellDates: true, codepage: 65001 });
+                    wb = XLSX.read(data, { type: 'array', cellDates: true, cellStyles: true, codepage: 65001 });
                 }
                 const ws = wb.Sheets[wb.SheetNames[0]]; 
 
@@ -5912,8 +5972,34 @@ const App: React.FC = () => {
                 setDuplicateHeadersWarning(duplicatesRenamed);
                 setOriginalFileHeaders(dedupedHeaders);
 
+                // Range information to determine worksheet-level absolute 0-indexed row numbers
+                const range = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : { s: { r: 0, c: 0 }, e: { r: rawArray.length - 1, c: 0 } };
+                
+                // Helper to detect if a row was hidden via Excel filter, group collapse, or manually
+                const isRowHidden = (sheetRowIdx: number): boolean => {
+                    if (!ws['!rows']) return false;
+                    const info = ws['!rows'][sheetRowIdx];
+                    if (!info) return false;
+                    // Hidden flag is set by Excel when rows are filtered out via AutoFilter or manually hidden
+                    if (info.hidden === true || (info as any).hidden === 1 || String((info as any).hidden) === 'true' || String((info as any).hidden) === '1') {
+                        return true;
+                    }
+                    // Height of 0 points or pixels also indicates a hidden/collapsed row
+                    if (info.hpt === 0 || info.hpx === 0) {
+                        return true;
+                    }
+                    return false;
+                };
+
+                let hiddenRowsCount = 0;
                 const json: any[] = [];
                 for (let r = 1; r < rawArray.length; r++) {
+                    const sheetRowIndex = range.s.r + r;
+                    if (isRowHidden(sheetRowIndex)) {
+                        hiddenRowsCount++;
+                        continue;
+                    }
+
                     const rowArray = rawArray[r];
                     if (!rowArray || rowArray.length === 0) continue;
                     
@@ -5929,11 +6015,19 @@ const App: React.FC = () => {
                             hasData = true;
                         }
                     }
-                    if (hasData) json.push(rowObj);
+                    if (hasData) {
+                        rowObj.__originalRowNumber__ = sheetRowIndex + 1;
+                        json.push(rowObj);
+                    }
                 }
                 
+                setSkippedHiddenRowsCount(hiddenRowsCount);
+
                 if (json.length === 0) {
-                    throw new Error("File is empty");
+                    if (hiddenRowsCount > 0) {
+                        throw new Error(`All ${hiddenRowsCount} data rows in the file are hidden or filtered out. Please unhide the rows you want to process in Excel.`);
+                    }
+                    throw new Error("File is empty or has no data");
                 }
                 
                 // Clear previous custom mapping state
@@ -5948,7 +6042,7 @@ const App: React.FC = () => {
                 setFieldMapping(new Map());
                 setReviews([]);
                 
-                const headers = Array.from(new Set(json.flatMap(row => Object.keys(row))));
+                const headers = Array.from(new Set(json.flatMap(row => Object.keys(row).filter(k => k !== '__originalRowNumber__'))));
                 const hasIdColumn = headers.includes("Planday Employee ID");
 
                 const targetFields = generateTargetFields(definitions);
@@ -5956,7 +6050,7 @@ const App: React.FC = () => {
                 const targetLabels = new Map(targetFields.map(f => [f.label, f.key])); // mapping from informational label to its update key
                 
                 const alwaysRecognized = new Set([
-                    "Planday Employee ID", "First Name", "Last Name", "Salary Identifier (Payroll ID)", "Username (Email)", "System ID"
+                    "Planday Employee ID", "First Name", "Last Name", "Salary Identifier (Payroll ID)", "Username (Email)", "System ID", "__originalRowNumber__"
                 ]);
 
                 const hasUnknownColumns = headers.some(h => {
@@ -6240,9 +6334,10 @@ const App: React.FC = () => {
                 if (uploadedName || expectedName) {
                     const isMatch = emp ? isLooseFuzzyNameMatch(expectedName, uploadedName) : false;
                     if (!isMatch) {
+                        const origRowNum = (row as any)?.__originalRowNumber__ ?? (idx + 2);
                         foundDiscrepancies.push({
                             rowIndex: idx,
-                            rowNumber: idx + 2,
+                            rowNumber: origRowNum,
                             idValue: cleanId,
                             idField: idCol,
                             idMethod: method,
@@ -6714,10 +6809,11 @@ const App: React.FC = () => {
                                       row["Username"] || 
                                       row["User Name"] || 
                                       row["Email"] || "";
-                        const displayName = extractedName || (idVal ? `Row ${idx + 2} (${idVal})` : `Row ${idx + 2} (Unmapped)`);
+                        const origRowNum = (row as any)?.__originalRowNumber__ ?? (idx + 2);
+                        const displayName = extractedName || (idVal ? `Row ${origRowNum} (${idVal})` : `Row ${origRowNum} (Unmapped)`);
                         skippedEmployees.push({
                             rowIndex: idx,
-                            rowNumber: idx + 2,
+                            rowNumber: origRowNum,
                             employeeName: displayName,
                             identifier: idVal ? String(idVal) : undefined,
                             rowData: row,
@@ -6729,7 +6825,8 @@ const App: React.FC = () => {
                     const newRow: any = {
                         "Planday Employee ID": empId,
                         "First Name": emp.firstName,
-                        "Last Name": emp.lastName
+                        "Last Name": emp.lastName,
+                        "__originalRowNumber__": (row as any)?.__originalRowNumber__ ?? (idx + 2)
                     };
 
                     const groupOrderForRates: string[] = [];
@@ -7019,7 +7116,7 @@ const App: React.FC = () => {
                         
                         ambiguities.push({
                             id: `${rowIndex}-${key}`,
-                            rowNum: rowIndex + 2,
+                            rowNum: (row as any)?.__originalRowNumber__ ?? (rowIndex + 2),
                             empName: `${row["First Name"]} ${row["Last Name"]}`,
                             field: fieldName,
                             input: val,
@@ -7121,7 +7218,7 @@ const App: React.FC = () => {
             const empName = `${row["First Name"] || ""} ${row["Last Name"] || ""}`.trim();
             const empIdStr = row["Planday Employee ID"];
             const empId = empIdStr ? parseInt(empIdStr, 10) : null;
-            const rowNum = rowIndex + 2;
+            const rowNum = (row as any)?.__originalRowNumber__ ?? (rowIndex + 2);
 
             let hasFixedSalary = false;
             const fixedSalaryFields = { period: false, hours: false, amount: false };
@@ -7684,7 +7781,7 @@ const App: React.FC = () => {
                 const parsed = parseDateWithFormat(raw, isUSFormat, correctedYear);
                 if (parsed && raw) {
                     report.push({
-                        rowNum: rowIndex + 2, 
+                        rowNum: (row as any)?.__originalRowNumber__ ?? (rowIndex + 2), 
                         field: fieldName,
                         original: formatOriginalDateForDisplay(raw, isUSFormat),
                         payload: parsed
@@ -8912,8 +9009,8 @@ const App: React.FC = () => {
                 : Array.from(
                     new Set<string>(
                         unmappedJson.length > 0
-                            ? unmappedJson.flatMap(r => Object.keys(r))
-                            : skippedUnmappedEmployees.flatMap(s => Object.keys(s.rowData))
+                            ? unmappedJson.flatMap(r => Object.keys(r).filter(k => k !== '__originalRowNumber__'))
+                            : skippedUnmappedEmployees.flatMap(s => Object.keys(s.rowData).filter(k => k !== '__originalRowNumber__'))
                     )
                 );
 
@@ -8990,8 +9087,8 @@ const App: React.FC = () => {
             : Array.from(
                 new Set<string>(
                     unmappedJson.length > 0
-                        ? unmappedJson.flatMap(r => Object.keys(r))
-                        : skippedUnmappedEmployees.flatMap(s => Object.keys(s.rowData))
+                        ? unmappedJson.flatMap(r => Object.keys(r).filter(k => k !== '__originalRowNumber__'))
+                        : skippedUnmappedEmployees.flatMap(s => Object.keys(s.rowData).filter(k => k !== '__originalRowNumber__'))
                 )
             );
 
@@ -10298,8 +10395,11 @@ const App: React.FC = () => {
                             headers={getNonEmptyHeaders(unmappedJson)}
                             employees={allEmployees}
                             onNext={handleIdentityMethodSelection}
+                            skippedHiddenRowsCount={skippedHiddenRowsCount}
+                            visibleRowsCount={unmappedJson.length}
                             onBack={() => {
                                 setUnmappedJson([]);
+                                setSkippedHiddenRowsCount(0);
                                 setCurrentStep('upload');
                             }}
                         />
@@ -10314,8 +10414,10 @@ const App: React.FC = () => {
                             sharedSalaryIdInfo={sharedSalaryIdState || undefined}
                             onShowSharedSalaryModal={() => setShowSharedSalaryIdModal(true)}
                             onComplete={handleEmployeeMappingComplete}
+                            skippedHiddenRowsCount={skippedHiddenRowsCount}
                             onCancel={() => {
                                 setUnmappedJson([]);
+                                setSkippedHiddenRowsCount(0);
                                 setCurrentStep('upload');
                             }}
                             onBack={() => {
@@ -10350,6 +10452,7 @@ const App: React.FC = () => {
                             onShowHelp={() => setShowHelpModal(true)}
                             duplicateHeadersWarning={duplicateHeadersWarning}
                             usedIdentityColumns={selectedIdentityColumns}
+                            skippedHiddenRowsCount={skippedHiddenRowsCount}
                         />
                     )}
 
@@ -10451,6 +10554,18 @@ const App: React.FC = () => {
                                             <h3 className="text-sm font-bold text-amber-900">Unmapped Employees Excluded ({skippedUnmappedEmployees.length})</h3>
                                             <p className="text-sm text-amber-700 mt-1">
                                                 <strong>{skippedUnmappedEmployees.length}</strong> employee(s) from your file were not mapped to Planday employees during the mapping stage and are excluded from the table below. When the update completes, they will be included in the update results overview and downloadable results file.
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {updateMethod !== 'editor' && skippedHiddenRowsCount > 0 && (
+                                    <div className="mb-6 p-4 bg-sky-50 border border-sky-200 rounded-lg flex items-start gap-3">
+                                        <div className="text-sky-600 font-bold text-lg leading-none mt-0.5">✓</div>
+                                        <div>
+                                            <h3 className="text-sm font-bold text-sky-900">Hidden / Filtered Rows Excluded ({skippedHiddenRowsCount})</h3>
+                                            <p className="text-sm text-sky-700 mt-1">
+                                                <strong>{skippedHiddenRowsCount}</strong> row{skippedHiddenRowsCount === 1 ? '' : 's'} hidden via Excel filter or collapsed in your file were skipped during parsing and are excluded from processing.
                                             </p>
                                         </div>
                                     </div>
