@@ -147,7 +147,23 @@ export interface DiscrepancyItem {
     expectedEmployeeId?: number;
     expectedName: string;
     uploadedName: string;
+    isSharedSalaryId?: boolean;
+    sharedCandidates?: { id: number; name: string }[];
 }
+
+export interface SharedSalaryIdGroup {
+    salaryId: string;
+    employees: Employee[];
+}
+
+export interface SharedSalaryIdState {
+    detected: boolean;
+    sharedGroups: SharedSalaryIdGroup[];
+    smartMatchedRowIndices: Set<number>;
+    unresolvedRowIndices: Set<number>;
+    salaryIdColumn?: string;
+}
+
 
 export interface SkippedUnmappedEmployee {
     rowIndex: number;

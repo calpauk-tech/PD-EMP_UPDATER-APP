@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx-js-style';
-import type { PlandayApiCredentials, DefinitionCollection, EmployeeUpdateReview, UpdateWageRatePayload, UpdateActionResult, FieldDefinition, Employee, DiscrepancyItem, SkippedUnmappedEmployee } from './types';
+import type { PlandayApiCredentials, DefinitionCollection, EmployeeUpdateReview, UpdateWageRatePayload, UpdateActionResult, FieldDefinition, Employee, DiscrepancyItem, SkippedUnmappedEmployee, SharedSalaryIdGroup, SharedSalaryIdState } from './types';
 import { initializeService, fetchEmployees, fetchAllDefinitions, fetchFieldDefinitions, fetchEmployeeDetails, fetchEmployeeContractRule, fetchEmployeeSalary, fetchEmployeePayRates, updateEmployee, assignContractRule, changeUsername, updateFixedSalary, updateWageRate, resetService, revokeToken, fetchPaginatedData, fetchPortalInfo } from './services/plandayService';
 
 // --- Utility Functions ---
@@ -402,7 +402,15 @@ const ReviewDiscrepanciesModal: React.FC<{
                                     Row {d.rowNumber}
                                 </span>
                                 <span className="leading-snug">
-                                    Row {d.rowNumber}: {d.idMethod === 'USERNAME' ? 'Username' : 'ID'} <code className="bg-white border px-1.5 py-0.5 rounded font-bold text-gray-800 font-mono">{d.idValue}</code> belongs to <strong className="text-green-700 font-bold">{d.expectedName}</strong>, but your file says <strong className="text-red-700 font-bold underline decoration-red-400">{d.uploadedName}</strong>
+                                    {d.isSharedSalaryId ? (
+                                        <>
+                                            Row {d.rowNumber}: Salary Identifier <code className="bg-white border px-1.5 py-0.5 rounded font-bold text-gray-800 font-mono">{d.idValue}</code> is shared by multiple employees in Planday (<span className="text-amber-800 font-semibold">{d.expectedName}</span>), but none match uploaded name <strong className="text-red-700 font-bold underline decoration-red-400">{d.uploadedName}</strong>
+                                        </>
+                                    ) : (
+                                        <>
+                                            Row {d.rowNumber}: {d.idMethod === 'USERNAME' ? 'Username' : (d.idMethod === 'API_ID' ? 'Planday ID' : 'Salary ID')} <code className="bg-white border px-1.5 py-0.5 rounded font-bold text-gray-800 font-mono">{d.idValue}</code> belongs to <strong className="text-green-700 font-bold">{d.expectedName}</strong>, but your file says <strong className="text-red-700 font-bold underline decoration-red-400">{d.uploadedName}</strong>
+                                        </>
+                                    )}
                                 </span>
                             </div>
 
@@ -413,7 +421,9 @@ const ReviewDiscrepanciesModal: React.FC<{
                                     <span className="font-mono font-semibold text-gray-800">{d.idValue}</span>
                                 </div>
                                 <div className="bg-white p-2 rounded border border-green-200">
-                                    <span className="text-green-700 block text-[10px] font-medium uppercase tracking-wider">Expected in Planday</span>
+                                    <span className="text-green-700 block text-[10px] font-medium uppercase tracking-wider">
+                                        {d.isSharedSalaryId ? `Employees in Planday (${d.sharedCandidates?.length || 2} share this ID)` : 'Expected in Planday'}
+                                    </span>
                                     <span className="font-semibold text-green-800">{d.expectedName}</span>
                                 </div>
                                 <div className="bg-white p-2 rounded border border-red-200">
@@ -457,6 +467,144 @@ const ReviewDiscrepanciesModal: React.FC<{
         </div>
     );
 };
+
+const SharedSalaryIdInfoModal: React.FC<{
+    isOpen: boolean;
+    sharedGroups: SharedSalaryIdGroup[];
+    smartMatchedCount: number;
+    unresolvedCount: number;
+    totalRows: number;
+    onReviewMappings: () => void;
+    onProceedToFields?: () => void;
+    canProceedToFields?: boolean;
+}> = ({ isOpen, sharedGroups, smartMatchedCount, unresolvedCount, totalRows, onReviewMappings, onProceedToFields, canProceedToFields }) => {
+    const [search, setSearch] = useState('');
+    if (!isOpen) return null;
+
+    const filteredGroups = sharedGroups.filter(g => 
+        !search || 
+        g.salaryId.toLowerCase().includes(search.toLowerCase()) ||
+        g.employees.some(e => `${e.firstName} ${e.lastName}`.toLowerCase().includes(search.toLowerCase()))
+    );
+
+    return (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-gray-900 bg-opacity-60 backdrop-blur-sm p-4 overflow-y-auto animate-fadeIn">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-amber-300">
+                <div className="p-6 border-b border-gray-100 bg-gradient-to-r from-amber-50 to-orange-50 flex items-start gap-4">
+                    <div className="w-12 h-12 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center flex-shrink-0 shadow-sm text-2xl">
+                        ⚠️
+                    </div>
+                    <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                            <h3 className="text-xl font-bold text-gray-900">Salary Identifier Check</h3>
+                            <span className="bg-amber-200 text-amber-900 text-xs font-bold px-2.5 py-0.5 rounded-full">
+                                {sharedGroups.length} Shared ID{sharedGroups.length === 1 ? '' : 's'} Detected
+                            </span>
+                        </div>
+                        <p className="text-sm text-gray-600 mt-1">
+                            Some employees in your Planday portal share the same Salary Identifier.
+                        </p>
+                    </div>
+                </div>
+
+                <div className="p-6 overflow-y-auto flex-1 space-y-4">
+                    <div className="space-y-2">
+                        {smartMatchedCount > 0 && (
+                            <div className="bg-green-50 border border-green-200 rounded-xl p-3.5 flex items-start gap-3">
+                                <span className="text-green-600 text-lg">✓</span>
+                                <div className="text-xs text-green-900">
+                                    <strong className="block font-bold text-sm text-green-800">
+                                        Smart Matching Succeeded ({smartMatchedCount} row{smartMatchedCount === 1 ? '' : 's'})
+                                    </strong>
+                                    The app looked up the candidate employees sharing the same Salary Identifier and matched each row with the correct person using employee name cross-check.
+                                </div>
+                            </div>
+                        )}
+
+                        {unresolvedCount > 0 && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 flex items-start gap-3">
+                                <span className="text-amber-600 text-lg">⚠️</span>
+                                <div className="text-xs text-amber-900">
+                                    <strong className="block font-bold text-sm text-amber-800">
+                                        Manual Review Required ({unresolvedCount} row{unresolvedCount === 1 ? '' : 's'})
+                                    </strong>
+                                    These rows have Salary Identifiers shared by multiple employees and could not be disambiguated automatically. They have been left unmapped so you can select the correct employee in the mapping table.
+                                </div>
+                            </div>
+                        )}
+
+                        {smartMatchedCount === 0 && unresolvedCount === 0 && (
+                            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3.5 text-xs text-blue-900">
+                                Shared Salary Identifiers exist in your portal, but none of the rows in your uploaded file were affected.
+                            </div>
+                        )}
+                    </div>
+
+                    <div>
+                        <div className="flex items-center justify-between mb-2">
+                            <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                Employees Sharing Salary Identifiers in Portal ({sharedGroups.length})
+                            </h4>
+                            {sharedGroups.length > 3 && (
+                                <input
+                                    type="text"
+                                    placeholder="Filter IDs or names..."
+                                    value={search}
+                                    onChange={e => setSearch(e.target.value)}
+                                    className="text-xs px-2.5 py-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                />
+                            )}
+                        </div>
+
+                        <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 max-h-56 overflow-y-auto bg-gray-50/50">
+                            {filteredGroups.map(g => (
+                                <div key={g.salaryId} className="p-3 text-xs">
+                                    <div className="flex items-center justify-between mb-1">
+                                        <span className="font-mono font-bold text-gray-900 bg-white border border-gray-200 px-2 py-0.5 rounded shadow-2xs">
+                                            Salary ID: {g.salaryId}
+                                        </span>
+                                        <span className="text-gray-500 text-[11px]">
+                                            {g.employees.length} employees
+                                        </span>
+                                    </div>
+                                    <div className="text-gray-600 pl-1 flex flex-wrap gap-x-3 gap-y-1 mt-1">
+                                        {g.employees.map(e => (
+                                            <span key={e.id} className="inline-flex items-center gap-1">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                                                <strong>{e.firstName} {e.lastName}</strong>
+                                                <span className="text-gray-400 font-mono text-[10px]">(ID: {e.id})</span>
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="p-4 px-6 border-t border-gray-100 bg-gray-50 flex items-center justify-end gap-3">
+                    <button
+                        type="button"
+                        onClick={onReviewMappings}
+                        className="px-4 py-2.5 text-xs font-bold rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 shadow-xs"
+                    >
+                        Review Employee Mappings
+                    </button>
+                    {canProceedToFields && onProceedToFields && (
+                        <button
+                            type="button"
+                            onClick={onProceedToFields}
+                            className="px-4 py-2.5 text-xs font-bold rounded-lg bg-blue-600 text-white hover:bg-blue-700 shadow-xs"
+                        >
+                            Proceed to Field Mapping &rarr;
+                        </button>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
 
 const normalizeMultilingualText = (s: string): string => {
     if (!s) return "";
@@ -1836,15 +1984,38 @@ const WageTypeSelection: React.FC<WageTypeSelectionProps> = ({ missingGroups, ha
 interface IdentitySelectorProps {
     isLoading?: boolean;
     headers: string[];
+    employees?: Employee[];
     onNext: (method: 'NAME' | 'ID' | 'API_ID' | 'USERNAME', config?: any) => void;
     onBack: () => void;
 }
 
-const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, onBack, isLoading }) => {
+const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, employees = [], onNext, onBack, isLoading }) => {
     const [method, setMethod] = useState<'NAME' | 'ID' | 'API_ID' | 'USERNAME'>('ID');
     const [selectedColumn, setSelectedColumn] = useState('');
     const [selectedApiIdColumn, setSelectedApiIdColumn] = useState('');
     const [selectedUsernameColumn, setSelectedUsernameColumn] = useState('');
+    const [showSharedSalaryDetails, setShowSharedSalaryDetails] = useState(false);
+
+    // Detect if any employees share the same salary identifier in the user portal
+    const sharedSalaryIdGroups = useMemo(() => {
+        if (!employees || employees.length === 0) return [];
+        const map = new Map<string, Employee[]>();
+        employees.forEach(e => {
+            if (!e.salaryIdentifier) return;
+            const sid = String(e.salaryIdentifier).trim();
+            if (!sid) return;
+            const key = sid.toLowerCase();
+            if (!map.has(key)) map.set(key, []);
+            map.get(key)!.push(e);
+        });
+        const dupes: SharedSalaryIdGroup[] = [];
+        map.forEach((emps) => {
+            if (emps.length > 1) {
+                dupes.push({ salaryId: String(emps[0].salaryIdentifier).trim(), employees: emps });
+            }
+        });
+        return dupes;
+    }, [employees]);
     
     // Name configuration for ID, API_ID & USERNAME methods (Scenario A & B)
     const [nameOption, setNameOption] = useState<'SPLIT' | 'SINGLE' | 'IGNORE'>('SPLIT');
@@ -2007,6 +2178,46 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
                                             placeholder="-- Select ID Column --" 
                                          />
                                      </div>
+                                      {/* Shared Salary Identifiers Check in User Portal */}
+                                      {sharedSalaryIdGroups.length > 0 && (
+                                          <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900">
+                                              <div className="flex items-start gap-2">
+                                                  <span className="text-amber-600 text-sm mt-0.5">⚠️</span>
+                                                  <div className="flex-1">
+                                                      <div className="flex items-center justify-between">
+                                                          <strong className="font-semibold text-amber-950">Shared Salary Identifiers Detected in Portal</strong>
+                                                          <span className="bg-amber-200/80 text-amber-900 font-bold px-2 py-0.5 rounded text-[10px]">
+                                                              {sharedSalaryIdGroups.length} Shared ID{sharedSalaryIdGroups.length === 1 ? '' : 's'}
+                                                          </span>
+                                                      </div>
+                                                      <p className="text-amber-800 mt-1 leading-relaxed">
+                                                          Some employees in your Planday portal share the same Salary Identifier (it is not unique for all employees). We strongly recommend mapping your Employee Name column(s) for <strong>Cross-Check Validation</strong> below so the app can look up the employees sharing the same identifier and match each row with the correct person.
+                                                      </p>
+                                                      <div className="mt-2">
+                                                          <button
+                                                              type="button"
+                                                              onClick={() => setShowSharedSalaryDetails(!showSharedSalaryDetails)}
+                                                              className="text-amber-900 underline font-semibold hover:text-amber-950 text-[11px]"
+                                                          >
+                                                              {showSharedSalaryDetails ? '▲ Hide employees sharing IDs' : `▼ View ${sharedSalaryIdGroups.length} shared identifier group${sharedSalaryIdGroups.length === 1 ? '' : 's'} in your portal`}
+                                                          </button>
+                                                          {showSharedSalaryDetails && (
+                                                              <div className="mt-2 bg-white/95 rounded border border-amber-200 p-2.5 max-h-36 overflow-y-auto space-y-2 text-[11px]">
+                                                                  {sharedSalaryIdGroups.map(g => (
+                                                                      <div key={g.salaryId} className="flex flex-col pb-1.5 border-b border-amber-100 last:border-0 last:pb-0">
+                                                                          <span className="font-mono font-bold text-gray-800">Salary ID: "{g.salaryId}"</span>
+                                                                          <span className="text-gray-600 pl-2">
+                                                                              Shared by: {g.employees.map(e => `${e.firstName} ${e.lastName} (ID: ${e.id})`).join(', ')}
+                                                                          </span>
+                                                                      </div>
+                                                                  ))}
+                                                              </div>
+                                                          )}
+                                                      </div>
+                                                  </div>
+                                              </div>
+                                          </div>
+                                      )}
 
                                      {/* Name Mapping for Cross-Check Validation */}
                                      <div className="pt-3 border-t border-gray-100">
@@ -2064,9 +2275,9 @@ const IdentitySelector: React.FC<IdentitySelectorProps> = ({ headers, onNext, on
                                          )}
 
                                          {nameOption === 'IGNORE' && (
-                                             <p className="text-xs text-amber-800 bg-amber-50 p-2.5 rounded border border-amber-200 animate-fadeIn">
-                                                 ⚠️ <strong>Notice:</strong> Name cross-check will be skipped. The system will proceed with the import relying solely on the provided IDs.
-                                             </p>
+                                              <p className="text-xs text-amber-800 bg-amber-50 p-2.5 rounded border border-amber-200 animate-fadeIn">
+                                                  ⚠️ <strong>Notice:</strong> Name cross-check will be skipped. {sharedSalaryIdGroups.length > 0 ? `Because ${sharedSalaryIdGroups.length} Salary Identifier(s) are shared across multiple employees in your portal, rows with those identifiers cannot be automatically matched and will be left unmapped for your manual selection in the next step.` : 'The system will proceed with the import relying solely on the provided IDs.'}
+                                              </p>
                                          )}
                                      </div>
                                  </div>
@@ -2339,13 +2550,15 @@ interface EmployeeMapperProps {
     employees: Employee[];
     initialMapping?: Map<number, number | null>;
     matchMethod?: 'NAME' | 'ID' | 'API_ID' | 'USERNAME';
+    sharedSalaryIdInfo?: SharedSalaryIdState;
+    onShowSharedSalaryModal?: () => void;
     onComplete: (mapping: Map<number, number>) => void;
     onCancel: () => void;
     onBack: () => void;
     onShowHelp?: () => void;
 }
 
-const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initialMapping, matchMethod = 'NAME', onComplete, onCancel, onBack, onShowHelp, isLoading }) => {
+const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initialMapping, matchMethod = 'NAME', sharedSalaryIdInfo, onShowSharedSalaryModal, onComplete, onCancel, onBack, onShowHelp, isLoading }) => {
     // Attempt auto-match on mount if initialMapping not provided
     const [mapping, setMapping] = useState<Map<number, number | null>>(new Map());
     const [showUnmappedFirst, setShowUnmappedFirst] = useState(false);
@@ -2630,6 +2843,49 @@ const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initia
                 </div>
             )}
 
+            {matchMethod === 'ID' && sharedSalaryIdInfo && sharedSalaryIdInfo.detected && (
+                <div className="bg-amber-50 border-l-4 border-amber-500 p-4 mb-6 rounded-r-lg animate-fadeIn">
+                    <div className="flex items-start">
+                        <div className="flex-shrink-0">
+                            <span className="text-xl">⚠️</span>
+                        </div>
+                        <div className="ml-3 flex-1">
+                            <div className="flex items-center justify-between flex-wrap gap-2">
+                                <h3 className="text-sm font-bold text-amber-900">
+                                    Shared Salary Identifiers Check
+                                </h3>
+                                {onShowSharedSalaryModal && (
+                                    <button
+                                        type="button"
+                                        onClick={onShowSharedSalaryModal}
+                                        className="text-xs bg-amber-200/80 hover:bg-amber-200 text-amber-900 font-semibold px-2.5 py-1 rounded-md transition-colors"
+                                    >
+                                        View {sharedSalaryIdInfo.sharedGroups.length} Shared Identifier Groups
+                                    </button>
+                                )}
+                            </div>
+                            <div className="mt-2 text-sm text-amber-800 space-y-1">
+                                <p>
+                                    We detected {sharedSalaryIdInfo.sharedGroups.length} Salary Identifier(s) shared by multiple employees in your Planday portal.
+                                </p>
+                                {sharedSalaryIdInfo.smartMatchedRowIndices.size > 0 && (
+                                    <p className="text-green-800 font-medium flex items-center gap-1.5">
+                                        <span>✓</span>
+                                        <strong>{sharedSalaryIdInfo.smartMatchedRowIndices.size}</strong> row(s) were successfully smart-matched to the correct employee by cross-checking with employee names.
+                                    </p>
+                                )}
+                                {sharedSalaryIdInfo.unresolvedRowIndices.size > 0 && (
+                                    <p className="text-amber-900 font-medium flex items-center gap-1.5">
+                                        <span>⚠️</span>
+                                        <strong>{sharedSalaryIdInfo.unresolvedRowIndices.size}</strong> row(s) have shared Salary Identifiers and require manual employee selection below.
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <h2 className="text-2xl font-bold mb-4">Map Employees</h2>
             {matchMethod === 'USERNAME' ? (
                 <p className="text-gray-500 mb-6">
@@ -2706,6 +2962,23 @@ const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initia
                             const isUnmapped = !currentId;
                             const matchStatus = matchTypes.get(originalIdx) || null;
                             
+                            let isSharedSalaryId = false;
+                            let isSmartMatched = false;
+                            let sharedCandidates: Employee[] | undefined;
+                            let salaryIdValue = '';
+
+                            if (sharedSalaryIdInfo && sharedSalaryIdInfo.salaryIdColumn) {
+                                const val = row[sharedSalaryIdInfo.salaryIdColumn];
+                                if (val !== undefined && val !== null) {
+                                    salaryIdValue = String(val).trim();
+                                    const grp = sharedSalaryIdInfo.sharedGroups.find(g => g.salaryId.toLowerCase() === salaryIdValue.toLowerCase());
+                                    if (grp) {
+                                        isSharedSalaryId = true;
+                                        sharedCandidates = grp.employees;
+                                    }
+                                }
+                                isSmartMatched = sharedSalaryIdInfo.smartMatchedRowIndices.has(originalIdx);
+                            }
                             return (
                                 <EmployeeMapperRow 
                                     key={originalIdx}
@@ -2717,6 +2990,10 @@ const EmployeeMapper: React.FC<EmployeeMapperProps> = ({ rows, employees, initia
                                     matchStatus={matchStatus}
                                     usedValues={usedEmployeeIds}
                                     onSelect={handleSelect}
+                                    isSharedSalaryId={isSharedSalaryId}
+                                    isSmartMatched={isSmartMatched}
+                                    sharedCandidates={sharedCandidates}
+                                    salaryIdValue={salaryIdValue}
                                 />
                             );
                         })}
@@ -2771,8 +3048,28 @@ const EmployeeMapperRow: React.FC<{
     matchStatus: 'exact' | 'auto' | 'manual' | null;
     usedValues?: Set<number | string>;
     onSelect: (rowIdx: number, empId: string) => void;
-}> = ({ row, originalIdx, mappedId, isUnmapped, employeeOptions, matchStatus, usedValues, onSelect }) => {
+    isSharedSalaryId?: boolean;
+    isSmartMatched?: boolean;
+    sharedCandidates?: Employee[];
+    salaryIdValue?: string;
+}> = ({ row, originalIdx, mappedId, isUnmapped, employeeOptions, matchStatus, usedValues, onSelect, isSharedSalaryId, isSmartMatched, sharedCandidates, salaryIdValue }) => {
     const sortedOptions = useMemo(() => {
+        if (isSharedSalaryId && sharedCandidates && sharedCandidates.length > 0) {
+            const sharedIds = new Set(sharedCandidates.map(c => c.id));
+            const matchedOpts = employeeOptions.filter(opt => sharedIds.has(opt.value));
+            const otherOpts = employeeOptions.filter(opt => !sharedIds.has(opt.value) && opt.value !== "");
+
+            const priorityOpts = matchedOpts.map(opt => ({
+                value: opt.value,
+                label: `⭐ (Shared Salary ID ${salaryIdValue}) ${opt.label}`
+            }));
+
+            return [
+                { value: "", label: "-- Skip Row --" },
+                ...priorityOpts,
+                ...otherOpts
+            ];
+        }
         const rowName = extractEmployeeName(row);
         const searchString = (rowName || Object.values(row).join(" ")).toLowerCase();
         
@@ -2791,7 +3088,7 @@ const EmployeeMapperRow: React.FC<{
             }
             return a.label.localeCompare(b.label);
         }).map(opt => ({ value: opt.value, label: opt.label }));
-    }, [row, employeeOptions]);
+    }, [row, employeeOptions, isSharedSalaryId, sharedCandidates, salaryIdValue]);
 
     const preview = Object.entries(row)
         .slice(0, 5)
@@ -2800,7 +3097,29 @@ const EmployeeMapperRow: React.FC<{
 
     return (
         <tr className={`hover:bg-gray-50 ${isUnmapped ? 'bg-[#ffe5e5]' : ''}`}>
-            <td className="p-3 text-gray-600 truncate max-w-md align-middle" dir="auto" title={preview}>{preview}</td>
+            <td className="p-3 text-gray-600 truncate max-w-md align-middle" dir="auto" title={preview}>
+                <div className="flex flex-col gap-1">
+                    <span className="truncate">{preview}</span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                        {isSmartMatched && (
+                            <span 
+                                className="inline-flex items-center gap-1 bg-green-50 text-green-700 border border-green-200 text-[10px] font-bold px-2 py-0.5 rounded-full"
+                                title={`Smart-matched: Multiple employees share Salary ID '${salaryIdValue}', but this employee was matched via name cross-check.`}
+                            >
+                                ✨ Smart-matched via Name (Salary ID: {salaryIdValue})
+                            </span>
+                        )}
+                        {isSharedSalaryId && !isSmartMatched && (
+                            <span 
+                                className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-full"
+                                title={`Salary ID '${salaryIdValue}' is shared by: ${sharedCandidates?.map(c => `${c.firstName} ${c.lastName}`).join(', ')}`}
+                            >
+                                ⚠️ Shared Salary ID: {salaryIdValue} ({sharedCandidates?.length || 2} employees share this)
+                            </span>
+                        )}
+                    </div>
+                </div>
+            </td>
             <td className="p-3 align-middle">
                 <SearchableSelect 
                     options={sortedOptions}
@@ -4548,6 +4867,10 @@ const App: React.FC = () => {
         nameCol1?: string;
         nameCol2?: string;
     } | null>(null);
+    // Shared Salary Identifiers state
+    const [sharedSalaryIdState, setSharedSalaryIdState] = useState<SharedSalaryIdState | null>(null);
+    const [showSharedSalaryIdModal, setShowSharedSalaryIdModal] = useState<boolean>(false);
+    const [pendingNextStepIfAllMapped, setPendingNextStepIfAllMapped] = useState<string | null>(null);
 
     const [showConfirmModal, setShowConfirmModal] = useState(false);
     const [isMissingFieldsExpanded, setIsMissingFieldsExpanded] = useState(false);
@@ -5774,7 +6097,6 @@ const App: React.FC = () => {
                 });
 
                 const mode = config?.mode || 'AUTO';
-
                 unmappedJson.forEach((row, idx) => {
                     let nameToMatch = "";
                     if (mode === 'AUTO') {
@@ -5834,7 +6156,6 @@ const App: React.FC = () => {
                         autoMap.set(idx, null);
                     }
                 });
-
                 ['Planday Employee ID', 'First Name', 'Last Name', 'Salary Identifier (Payroll ID)', 'Username (Email)'].forEach(c => {
                     if (!usedCols.includes(c)) usedCols.push(c);
                 });
@@ -5868,17 +6189,6 @@ const App: React.FC = () => {
                 }
                 const cleanId = String(rawId).trim();
 
-                let emp: Employee | undefined;
-                if (method === 'API_ID') {
-                    emp = allEmployees.find(e => String(e.id).trim().toLowerCase() === cleanId.toLowerCase());
-                } else if (method === 'USERNAME') {
-                    emp = allEmployees.find(e => e.userName && String(e.userName).trim().toLowerCase() === cleanId.toLowerCase());
-                } else {
-                    emp = allEmployees.find(e => e.salaryIdentifier && String(e.salaryIdentifier).trim().toLowerCase() === cleanId.toLowerCase());
-                }
-
-                const expectedName = emp ? `${emp.firstName || ''} ${emp.lastName || ''}`.trim() : '';
-
                 let uploadedName = '';
                 if (nameOption === 'SPLIT') {
                     const first = row[nameCol1] || '';
@@ -5886,6 +6196,45 @@ const App: React.FC = () => {
                     uploadedName = `${first} ${last}`.trim();
                 } else if (nameOption === 'SINGLE') {
                     uploadedName = String(row[nameCol1] || '').trim();
+                }
+
+                let emp: Employee | undefined;
+                let isShared = false;
+                let sharedCandidates: Employee[] = [];
+                let expectedName = '';
+
+                if (method === 'API_ID') {
+                    emp = allEmployees.find(e => String(e.id).trim().toLowerCase() === cleanId.toLowerCase());
+                    expectedName = emp ? `${emp.firstName || ''} ${emp.lastName || ''}`.trim() : '';
+                } else if (method === 'USERNAME') {
+                    emp = allEmployees.find(e => e.userName && String(e.userName).trim().toLowerCase() === cleanId.toLowerCase());
+                    expectedName = emp ? `${emp.firstName || ''} ${emp.lastName || ''}`.trim() : '';
+                } else {
+                    // Salary Identifier (Payroll ID)
+                    const candidates = allEmployees.filter(e => e.salaryIdentifier && String(e.salaryIdentifier).trim().toLowerCase() === cleanId.toLowerCase());
+                    if (candidates.length === 1) {
+                        emp = candidates[0];
+                        expectedName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim();
+                    } else if (candidates.length > 1) {
+                        isShared = true;
+                        sharedCandidates = candidates;
+                        // When the user matches crosscheck salary identifier with name,
+                        // the app should be smart enough to look up the employees that share the same salary identifier and match with the correct one.
+                        const matchedCandidate = candidates.find(c => {
+                            const candName = `${c.firstName || ''} ${c.lastName || ''}`.trim();
+                            return isLooseFuzzyNameMatch(candName, uploadedName);
+                        });
+                        if (matchedCandidate) {
+                            emp = matchedCandidate;
+                            expectedName = `${emp.firstName || ''} ${emp.lastName || ''}`.trim();
+                        } else {
+                            emp = undefined;
+                            expectedName = candidates.map(c => `${c.firstName || ''} ${c.lastName || ''}`.trim()).filter(Boolean).join(', ');
+                        }
+                    } else {
+                        emp = undefined;
+                        expectedName = '';
+                    }
                 }
 
                 if (uploadedName || expectedName) {
@@ -5898,8 +6247,10 @@ const App: React.FC = () => {
                             idField: idCol,
                             idMethod: method,
                             expectedEmployeeId: emp?.id,
-                            expectedName: expectedName || `(No employee found in Planday with this ${method === 'USERNAME' ? 'Username' : 'ID'})`,
-                            uploadedName: uploadedName || "(No name provided in file row)"
+                            expectedName: expectedName || `(No employee found in Planday with this ${method === "USERNAME" ? "Username" : "ID"})`,
+                            uploadedName: uploadedName || "(No name provided in file row)",
+                            isSharedSalaryId: isShared,
+                            sharedCandidates: isShared ? sharedCandidates.map(c => ({ id: c.id, name: `${c.firstName || ''} ${c.lastName || ''}`.trim() })) : undefined
                         });
                     }
                 }
@@ -5954,9 +6305,12 @@ const App: React.FC = () => {
                 if (!usedCols.includes(c)) usedCols.push(c);
             });
 
+            const smartMatchedRows = new Set<number>();
+            const unresolvedSharedRows = new Set<number>();
+
             unmappedJson.forEach((row, idx) => {
                 const val = row[idCol];
-                if (val !== undefined && val !== null) {
+                if (val !== undefined && val !== null && String(val).trim() !== '') {
                     const cleanVal = String(val).trim().toLowerCase();
                     let emp: Employee | undefined;
                     if (method === 'API_ID') {
@@ -5964,30 +6318,99 @@ const App: React.FC = () => {
                     } else if (method === 'USERNAME') {
                         emp = allEmployees.find(e => e.userName && String(e.userName).trim().toLowerCase() === cleanVal);
                     } else {
-                        emp = allEmployees.find(e => e.salaryIdentifier && String(e.salaryIdentifier).trim().toLowerCase() === cleanVal);
+                        // Salary Identifier (Payroll ID)
+                        const candidates = allEmployees.filter(e => e.salaryIdentifier && String(e.salaryIdentifier).trim().toLowerCase() === cleanVal);
+                        if (candidates.length === 1) {
+                            emp = candidates[0];
+                        } else if (candidates.length > 1) {
+                            if (nameOption !== 'IGNORE') {
+                                let uploadedName = '';
+                                if (nameOption === 'SPLIT') {
+                                    const first = row[nameCol1] || '';
+                                    const last = row[nameCol2] || '';
+                                    uploadedName = `${first} ${last}`.trim();
+                                } else if (nameOption === 'SINGLE') {
+                                    uploadedName = String(row[nameCol1] || '').trim();
+                                }
+
+                                const matched = candidates.find(c => {
+                                    const candName = `${c.firstName || ''} ${c.lastName || ''}`.trim();
+                                    return isLooseFuzzyNameMatch(candName, uploadedName);
+                                });
+
+                                if (matched) {
+                                    emp = matched;
+                                    smartMatchedRows.add(idx);
+                                } else {
+                                    unresolvedSharedRows.add(idx);
+                                }
+                            } else {
+                                // Names ignored: cannot safely disambiguate
+                                unresolvedSharedRows.add(idx);
+                            }
+                        }
                     }
+
                     if (emp && !matchedEmpIds.has(emp.id)) {
                         autoMap.set(idx, emp.id);
                         matchedEmpIds.add(emp.id);
+                    } else if (emp) {
+                        autoMap.set(idx, emp.id);
                     } else {
-                        autoMap.set(idx, emp ? emp.id : null);
+                        autoMap.set(idx, null);
                     }
                 } else {
                     autoMap.set(idx, null);
                 }
             });
 
+            // Check if any employees in the user portal share the same salary identifier
+            const sharedSalaryGroups: SharedSalaryIdGroup[] = [];
+            const salaryGroupMap = new Map<string, Employee[]>();
+            allEmployees.forEach(e => {
+                if (!e.salaryIdentifier) return;
+                const sid = String(e.salaryIdentifier).trim();
+                if (!sid) return;
+                const key = sid.toLowerCase();
+                if (!salaryGroupMap.has(key)) salaryGroupMap.set(key, []);
+                salaryGroupMap.get(key)!.push(e);
+            });
+            salaryGroupMap.forEach(emps => {
+                if (emps.length > 1) {
+                    sharedSalaryGroups.push({
+                        salaryId: String(emps[0].salaryIdentifier).trim(),
+                        employees: emps
+                    });
+                }
+            });
+
+            const sharedState: SharedSalaryIdState = {
+                detected: sharedSalaryGroups.length > 0,
+                sharedGroups: sharedSalaryGroups,
+                smartMatchedRowIndices: smartMatchedRows,
+                unresolvedRowIndices: unresolvedSharedRows,
+                salaryIdColumn: idCol,
+            };
+            setSharedSalaryIdState(sharedState);
+
             setSelectedIdentityColumns(usedCols);
             setEmployeeMapping(autoMap);
             setInitialAutoMapping(autoMap);
 
             const unmappedCount = Array.from(autoMap.values()).filter(v => v === null).length;
-            if (unmappedCount > 0) {
-                // Some IDs were not found in Planday; allow user to review unmapped rows
-                setCurrentStep('map_employees');
+            if (method === 'ID' && sharedSalaryGroups.length > 0) {
+                setShowSharedSalaryIdModal(true);
+                if (unmappedCount > 0) {
+                    setCurrentStep('map_employees');
+                } else {
+                    setPendingNextStepIfAllMapped('map_fields');
+                }
             } else {
-                // All rows successfully matched by ID, proceed straight to field mapping
-                setCurrentStep('map_fields');
+                if (unmappedCount > 0) {
+                    setCurrentStep('map_employees');
+                } else {
+                    setCurrentStep('map_fields');
+                }
             }
 
             setIsLoading(false);
@@ -6000,6 +6423,9 @@ const App: React.FC = () => {
         setDiscrepancies([]);
         setIgnoredDiscrepancies(false);
         setPendingIdConfig(null);
+        setShowSharedSalaryIdModal(false);
+        setSharedSalaryIdState(null);
+        setPendingNextStepIfAllMapped(null);
         setUnmappedJson([]);
         setOriginalFileHeaders([]);
         setSkippedUnmappedEmployees([]);
@@ -9870,6 +10296,7 @@ const App: React.FC = () => {
                     {currentStep === 'identity_method' && (
                         <IdentitySelector isLoading={isLoading} 
                             headers={getNonEmptyHeaders(unmappedJson)}
+                            employees={allEmployees}
                             onNext={handleIdentityMethodSelection}
                             onBack={() => {
                                 setUnmappedJson([]);
@@ -9884,6 +10311,8 @@ const App: React.FC = () => {
                             employees={allEmployees}
                             initialMapping={initialAutoMapping}
                             matchMethod={selectedIdentityMethod}
+                            sharedSalaryIdInfo={sharedSalaryIdState || undefined}
+                            onShowSharedSalaryModal={() => setShowSharedSalaryIdModal(true)}
                             onComplete={handleEmployeeMappingComplete}
                             onCancel={() => {
                                 setUnmappedJson([]);
@@ -10924,6 +11353,24 @@ const App: React.FC = () => {
                 discrepancies={discrepancies}
                 onCancelUploadNew={handleCancelUploadNew}
                 onIgnoreAndProceed={handleIgnoreDiscrepanciesAndProceed}
+            />
+
+            <SharedSalaryIdInfoModal
+                isOpen={showSharedSalaryIdModal}
+                sharedGroups={sharedSalaryIdState?.sharedGroups || []}
+                smartMatchedCount={sharedSalaryIdState?.smartMatchedRowIndices.size || 0}
+                unresolvedCount={sharedSalaryIdState?.unresolvedRowIndices.size || 0}
+                totalRows={unmappedJson.length}
+                onReviewMappings={() => {
+                    setShowSharedSalaryIdModal(false);
+                    setCurrentStep('map_employees');
+                }}
+                canProceedToFields={pendingNextStepIfAllMapped === 'map_fields'}
+                onProceedToFields={() => {
+                    setShowSharedSalaryIdModal(false);
+                    setPendingNextStepIfAllMapped(null);
+                    setCurrentStep('map_fields');
+                }}
             />
             {/* Stop Confirmation Modal */}
             {isStopModalOpen && (
